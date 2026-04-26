@@ -1,3 +1,18 @@
+function calculateDistance(point1, point2) {
+    return window.Math.hypot(point1.x - point2.x, point1.y - point2.y);
+}
+
+function SendWSmsg(message) {
+    try {
+        if (window.ws && window.ws.readyState === 1) {
+            window.ws.send(JSON.stringify(message));
+            return;
+        }
+        if (typeof Client === 'undefined' || !Client.sendPacket) return;
+        if (Client.state !== 1) return;
+        Client.sendPacket(JSON.stringify(message));
+    } catch(e) {}
+}
 
 
 
@@ -874,19 +889,6 @@ var _aimbotFrameCount = 0;
      GetAllTargets.mousePosition.y = event.clientY;
  });
 
-// ================== MOD MENU V3 ==================
-window.onload = () => { window._doInitMenu(); };
-window._doInitMenu = function() {
-    if (localStorage.getItem("BestModMenuConfig") === null) {
-        localStorage.setItem("BestModMenuConfig", JSON.stringify(MOD));
-        Object.assign(MOD, new HackCon());
-    } else {
-        try { Object.assign(MOD, JSON.parse(localStorage.getItem("BestModMenuConfig"))); }
-        catch(e) { localStorage.setItem("BestModMenuConfig", JSON.stringify(MOD)); Object.assign(MOD, new HackCon()); }
-    }
-
-    // hotkey refs
-    var R = {};
 
     // ────────────────────────────────────── STYLES ──────────────────────────────────────
     var css = document.createElement('style');
