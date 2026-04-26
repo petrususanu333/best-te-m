@@ -890,6 +890,21 @@ var _aimbotFrameCount = 0;
  });
 
 
+// ================== MOD MENU V3 ==================
+window.onload = () => { window._doInitMenu(); };
+window._doInitMenu = function() {
+    if (localStorage.getItem("BestModMenuConfig") === null) {
+        localStorage.setItem("BestModMenuConfig", JSON.stringify(MOD));
+        Object.assign(MOD, new HackCon());
+    } else {
+        try { Object.assign(MOD, JSON.parse(localStorage.getItem("BestModMenuConfig"))); }
+        catch(e) { localStorage.setItem("BestModMenuConfig", JSON.stringify(MOD)); Object.assign(MOD, new HackCon()); }
+    }
+
+    // hotkey refs
+    var R = {};
+
+
     // ────────────────────────────────────── STYLES ──────────────────────────────────────
     var css = document.createElement('style');
     css.textContent = `
