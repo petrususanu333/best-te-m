@@ -1,16 +1,4 @@
 
-function SendWSmsg(message) {
-    try {
-        if (window.ws && window.ws.readyState === 1) {
-            window.ws.send(JSON.stringify(message));
-            return;
-        }
-        if (typeof Client === 'undefined' || !Client.sendPacket) return;
-        if (Client.state !== 1) return;
-        Client.sendPacket(JSON.stringify(message));
-    } catch(e) {}
-}
-
 
 
 
