@@ -1,6 +1,3 @@
-function calculateDistance(point1, point2) {
-    return window.Math.hypot(point1.x - point2.x, point1.y - point2.y);
-}
 
 function SendWSmsg(message) {
     try {
