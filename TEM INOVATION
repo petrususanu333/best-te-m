@@ -14,12 +14,12 @@ function SendWSmsg(message) {
     } catch(e) {}
 }
 
-ф
+
 
 
 
 // ================== ОСНОВНОЙ КЛАСС НАСТРОЕК (V5 ULTRA) ==================
-class HackCon {
+class HackCo {
     constructor() {
         this.SAutoLootEnabled = false;
         this.FAutoLootEnabled = false;
