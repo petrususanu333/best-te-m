@@ -89981,198 +89981,487 @@ var fb = class {
 };
 export { Vf as $, Zh as A, f as At, qp as B, cg as C, $i as Ct, eg as D, k as Dt, tg as E, M as Et, zh as F, u as Ft, Op as G, Kp as H, H as I, B as J, kp as K, um as L, Yh as M, o as Mt, Jh as N, c as Nt, $h as O, h as Ot, qh as P, d as Pt, R as Q, lm as R, lg as S, ea as St, ng as T, dn as Tt, Gp as U, Jp as V, Up as W, z as X, xp as Y, Hf as Z, Sg as _, jc as _t, qy as a, kf as at, dg as b, cs as bt, uy as c, If as ct, Cg as d, Of as dt, Bf as et, jg as f, Mf as ft, xg as g, zu as gt, Pg as h, cd as ht, Xy as i, Af as it, Xh as j, s as jt, Qh as k, C as kt, ly as l, Lf as lt, Ng as m, Pd as mt, cb as n, jf as nt, Fy as o, Rf as ot, Mg as p, Bd as pt, Cp as q, eb as r, Pf as rt, dy as s, Nf as st, fb as t, zf as tt, Zv as u, L as ut, pg as v, Rs as vt, rg as w, Mr as wt, ug as x, as as xt, fg as y, Ms as yt, nm as z };
 
+
 // ═══════════════════════════════════════════════════════════════
-// ESP + AIMBOT — Surviv.io bundle injection
-// xg.prototype.deserialize hook  |  Z = toggle aimbot
+// ESP + AIMBOT v4.0 — Surviv.io
+// Z = aimbot | M = mouse fov | Scroll = ESP zoom
 // ═══════════════════════════════════════════════════════════════
 if (!window.__ESP_LOADED) {
   window.__ESP_LOADED = true;
 
-  // ── 1. MODULE-SCOPE STATE ────────────────────────────────────
-  window.__espPlayers  = new Map(); // entity __id  → player obj
-  window.__espInfos    = new Map(); // player id    → {playerId, teamId, name}
-  window.__espActiveId = 0;         // local player entity id
-  window.__espZoom     = 28;        // camera zoom radius (world units)
-  window.__espAimbot   = false;     // aimbot toggle (Z key)
+  window.__espPlayers       = new Map();
+  window.__espInfos         = new Map();
+  window.__espActiveId      = 0;
+  window.__espZoom          = 28;   // raw base zoom from server
+  window.__espGameZoom      = 28;   // actual zoom game is rendering with
+  window.__espZoomMult      = 1;    // user scroll multiplier (default 1 = correct positions)
+  window.__espAimbot        = false;
+  window.__espVels          = new Map();
+  window.__espLoot          = new Map();  // авто-лут: позиции предметов
 
-  // ── 2. HOOK xg.prototype.deserialize ─────────────────────────
-  // xg is the UpdateMsg class (exported as 'g'). Called every server tick.
+  window.__espReset = function () {
+    window.__espPlayers.clear();
+    window.__espInfos.clear();
+    window.__espVels.clear();
+    window.__espLoot.clear();
+    window.__espActiveId = 0;
+    window.__espZoom     = 28;
+    window.__espGameZoom = 28;
+  };
+
+  // ── WebSocket пинг (перехват до создания игрового WS) ────────────
+  window.__espPing = 0;
+  (function () {
+    var OrigWS = window.WebSocket;
+    function EspWS(url, proto) {
+      var ws = proto !== undefined ? new OrigWS(url, proto) : new OrigWS(url);
+      var lastSend = 0;
+      var origSend = ws.send.bind(ws);
+      ws.send = function (d) {
+        lastSend = performance.now();
+        return origSend(d);
+      };
+      ws.addEventListener('message', function () {
+        if (lastSend > 0) {
+          window.__espPing = Math.round(performance.now() - lastSend);
+          lastSend = 0;
+        }
+      });
+      return ws;
+    }
+    EspWS.CONNECTING = OrigWS.CONNECTING;
+    EspWS.OPEN       = OrigWS.OPEN;
+    EspWS.CLOSING    = OrigWS.CLOSING;
+    EspWS.CLOSED     = OrigWS.CLOSED;
+    EspWS.prototype  = OrigWS.prototype;
+    window.WebSocket = EspWS;
+  })();
+
+  // ── FPS счётчик ──────────────────────────────────────────────────
+  window.__espFPS       = 0;
+  window.__espFpsCount  = 0;
+  window.__espFpsLast   = performance.now();
+
+  // ── Hook deserialize ──────────────────────────────────────────
   {
-    var _ESP_PLAYER = pg.Player; // == 1
-    var _ESP_orig   = xg.prototype.deserialize;
+    var _ESP_PLAYER  = pg.Player;
+    var _ESP_LOOT    = pg.Loot;
+    var _ESP_orig    = xg.prototype.deserialize;
+    var _ESP_prevAid = 0;
+
+    // ── Hook eg.prototype.serialize — аимбот и лут через файлы игры ─
+    var _ESP_origInput = eg.prototype.serialize;
+    eg.prototype.serialize = function (stream) {
+      // ── Aimbot: инжектируем toMouseDir напрямую в пакет игры ──────
+      if (window.__espAimbot && window.__espAimbotTarget) {
+        var tgt   = window.__espAimbotTarget;
+        var local = window.__espPlayers.get(window.__espActiveId);
+        if (local && local.pos && tgt && tgt.pos) {
+          var dx = tgt.pos.x - local.pos.x;
+          var dy = tgt.pos.y - local.pos.y;
+          var len = Math.sqrt(dx*dx + dy*dy);
+          if (len > 0.001) {
+            this.toMouseDir = { x: dx / len, y: dy / len };
+            this.toMouseLen = Math.min(len, 64); // Cg.MouseMaxDist = 64
+          }
+        }
+      }
+      // ── Auto-loot: только Loot(10) — НЕ Interact(7), иначе открываются двери ──
+      if (window.__espAutoLootActive) {
+        this.addInput(10); // Loot only
+      }
+      // auto-shoot убран — стреляет игрок вручную
+      _ESP_origInput.call(this, stream);
+    };
 
     xg.prototype.deserialize = function (stream, msgType) {
       try { _ESP_orig.call(this, stream, msgType); } catch (e) { return; }
-
       try {
-        // Full objects — appear when entity first becomes visible
+        // ── New match detection ───────────────────────────────
+        if (this.activePlayerIdDirty && this.activePlayerId) {
+          if (_ESP_prevAid !== 0 && this.activePlayerId !== _ESP_prevAid) {
+            window.__espReset();
+          }
+          _ESP_prevAid         = this.activePlayerId;
+          window.__espActiveId = this.activePlayerId;
+        }
+
+        // ── Full objects ───────────────────────────────────────
         for (var i = 0; i < (this.fullObjects || []).length; i++) {
-          var fo = this.fullObjects[i];
+          var fo   = this.fullObjects[i];
           if (fo.__type !== _ESP_PLAYER) continue;
-          var fex = window.__espPlayers.get(fo.__id);
+          var fex  = window.__espPlayers.get(fo.__id);
+          var now  = performance.now();
           if (fex) {
-            if (fo.pos) fex.pos = fo.pos;
-            fex.dead = !!fo.dead; fex.downed = !!fo.downed;
+            if (fo.pos) {
+              var v = window.__espVels.get(fo.__id);
+              if (v && now - v.lastTime < 800 && fex.pos) {
+                var dt = now - v.lastTime;
+                v.vx = (fo.pos.x - v.lastX) / dt * 1000;
+                v.vy = (fo.pos.y - v.lastY) / dt * 1000;
+                v.lastX = fo.pos.x; v.lastY = fo.pos.y; v.lastTime = now;
+              } else {
+                window.__espVels.set(fo.__id, {vx:0,vy:0,lastX:fo.pos.x,lastY:fo.pos.y,lastTime:now});
+              }
+              fex.pos = fo.pos;
+            }
+            fex.dead   = !!fo.dead;
+            fex.downed = !!fo.downed;
           } else {
             window.__espPlayers.set(fo.__id, Object.assign({}, fo));
+            if (fo.pos) window.__espVels.set(fo.__id, {vx:0,vy:0,lastX:fo.pos.x,lastY:fo.pos.y,lastTime:now});
           }
         }
 
-        // Part objects — frequent position/dir updates
+        // ── Loot tracking (fullObjects) ───────────────────────
+        for (var li = 0; li < (this.fullObjects || []).length; li++) {
+          var lfo = this.fullObjects[li];
+          if (lfo.__type === _ESP_LOOT && lfo.pos) {
+            window.__espLoot.set(lfo.__id, { pos: lfo.pos, type: lfo.type || '' });
+          }
+        }
+        // ── Part objects ───────────────────────────────────────
         for (var j = 0; j < (this.partObjects || []).length; j++) {
-          var po = this.partObjects[j];
+          var po  = this.partObjects[j];
+          // Update loot positions from part updates
+          if (po.__type === _ESP_LOOT && po.pos) {
+            var lx2 = window.__espLoot.get(po.__id);
+            if (lx2) lx2.pos = po.pos;
+            else window.__espLoot.set(po.__id, { pos: po.pos });
+          }
           if (po.__type !== _ESP_PLAYER) continue;
           var pex = window.__espPlayers.get(po.__id);
           if (pex) {
+            var now2 = performance.now();
+            if (po.pos) {
+              var v2 = window.__espVels.get(po.__id);
+              if (v2 && now2 - v2.lastTime < 800) {
+                var dt2 = now2 - v2.lastTime;
+                if (dt2 > 5) {
+                  v2.vx = (po.pos.x - v2.lastX) / dt2 * 1000;
+                  v2.vy = (po.pos.y - v2.lastY) / dt2 * 1000;
+                  v2.lastX = po.pos.x; v2.lastY = po.pos.y; v2.lastTime = now2;
+                }
+              } else {
+                window.__espVels.set(po.__id, {vx:0,vy:0,lastX:po.pos.x,lastY:po.pos.y,lastTime:now2});
+              }
+            }
             pex.pos = po.pos; pex.dir = po.dir;
           } else {
             window.__espPlayers.set(po.__id, Object.assign({}, po));
           }
         }
 
-        // Player infos (teamId, name)
+        // ── Player infos ───────────────────────────────────────
         for (var k = 0; k < (this.playerInfos || []).length; k++) {
-          var inf = this.playerInfos[k];
-          window.__espInfos.set(inf.playerId, inf);
+          window.__espInfos.set(this.playerInfos[k].playerId, this.playerInfos[k]);
         }
-
-        // Remove despawned players
+        // delObjIds = all deleted objects (loot, obstacles, etc.)
+        for (var di = 0; di < (this.delObjIds || []).length; di++) {
+          window.__espLoot.delete(this.delObjIds[di]);
+        }
         for (var m = 0; m < (this.deletedPlayerIds || []).length; m++) {
-          window.__espPlayers.delete(this.deletedPlayerIds[m]);
+          var delId = this.deletedPlayerIds[m];
+          // If OUR player was deleted → match ended, wipe everything
+          if (delId === window.__espActiveId) {
+            window.__espReset();
+          } else {
+            window.__espPlayers.delete(delId);
+            window.__espVels.delete(delId);
+          }
         }
 
-        // Local player entity id
-        if (this.activePlayerIdDirty && this.activePlayerId) {
-          window.__espActiveId = this.activePlayerId;
-        }
+        // Track last packet time — used for inactivity reset
+        window.__espLastPkt = performance.now();
 
-        // Camera zoom radius (world units): 28=1x, 36=2x, 48=4x, 68=8x
+        // ── Zoom ───────────────────────────────────────────────
+        // Фикс: принудительно применяем зум КАЖДЫЙ пакет (не ждём zoomDirty).
+        // Когда сервер шлёт zoomDirty=true — сохраняем базовый зум.
+        // Затем форсируем zoomDirty=true в каждом пакете с нашим множителем,
+        // чтобы игра сразу применяла зум при кручении колесика.
         var apd = this.activePlayerData;
-        if (apd && apd.zoomDirty && apd.zoom > 0) {
-          window.__espZoom = apd.zoom;
+        if (apd) {
+          // Обновляем базовый зум только когда сервер действительно его меняет
+          if (apd.zoomDirty && apd.zoom > 0) {
+            window.__espZoom = apd.zoom;
+          }
+          // Применяем наш множитель в КАЖДОМ пакете
+          if (window.__espZoom > 0) {
+            var zm = window.__espZoomMult || 1;
+            var overridden = Math.min(Math.round(window.__espZoom * zm), 255);
+            apd.zoom = overridden;
+            apd.zoomDirty = true;   // ← форсируем: игра применяет зум сразу
+            window.__espGameZoom = overridden;
+          }
         }
       } catch (_) {}
     };
   }
 
-  // ── 3. ESP OVERLAY, MENU & AIMBOT ────────────────────────────
+  // ── Main IIFE ─────────────────────────────────────────────────
   (function () {
     var CFG = {
       espOn:     true,
-      boxes:     true,
-      distance:  true,
-      snaplines: false,
+      lines:     true,
       teammates: false,
-      aimbotOn:  false,   // synced with window.__espAimbot
-      aimbotFOV: 600,     // max pixel radius to look for target
-      enemyCol:  '#ff3333',
-      teamCol:   '#33ff88',
-      aimCol:    '#ffff00'
+      predict:   true,
+      predictMs: 80,
+      aimbotOn:  false,
+      aimbotFOV: 300,
+      mouseFOV:  true,
+      autoLoot:  false,
+      keyAimbot: 'KeyZ',   // keybind for aimbot toggle
+      keyLoot:   'KeyF',   // keybind for auto-loot toggle
+      enemyCol:  '#ff4444',
+      teamCol:   '#44ff99',
+      aimCol:    '#ffe040'
     };
 
     var ov, ctx;
-    var gameCanvas = null;
-    var mouseX = window.innerWidth / 2;
-    var mouseY = window.innerHeight / 2;
-    document.addEventListener('mousemove', function(e) { mouseX = e.clientX; mouseY = e.clientY; }, true);
+    var gameCanvas  = null;
+    var mouseX      = window.innerWidth  / 2;
+    var mouseY      = window.innerHeight / 2;
+    var fovDash     = 0;
+    var fovPulse    = 0;
 
-    // ── Canvas ──────────────────────────────────────────────────
+    // Трекинг курсора — работает и с Pointer Lock (игра захватывает мышь)
+    // При Pointer Lock clientX/Y застывают в центре экрана,
+    // поэтому накапливаем позицию через movementX/Y
+    window.addEventListener('mousemove', function (e) {
+      if (document.pointerLockElement) {
+        // Pointer Lock активен — накапливаем смещения, зажимаем в пределах окна
+        mouseX = Math.max(0, Math.min(window.innerWidth,  mouseX + e.movementX));
+        mouseY = Math.max(0, Math.min(window.innerHeight, mouseY + e.movementY));
+      } else {
+        mouseX = e.clientX;
+        mouseY = e.clientY;
+      }
+    }, true);
+
+    // ── Canvas ────────────────────────────────────────────────────
     function initCanvas() {
-      ov  = document.createElement('canvas');
+      ov = document.createElement('canvas');
       ov.style.cssText =
         'position:fixed;top:0;left:0;width:100%;height:100%;' +
         'pointer-events:none;z-index:99998;';
       document.body.appendChild(ov);
       ctx = ov.getContext('2d');
+
+      var zhud = document.createElement('div');
+      zhud.id  = '__esp_zoom_hud';
+      zhud.setAttribute('style',
+        'position:fixed;bottom:22px;left:50%;transform:translateX(-50%);' +
+        'z-index:100000;pointer-events:none;' +
+        'background:rgba(0,0,0,0.80);border:1px solid rgba(255,255,255,0.13);' +
+        'border-radius:10px;padding:5px 18px;' +
+        'font-family:Arial,sans-serif;font-size:13px;font-weight:700;color:#fff;' +
+        'letter-spacing:.08em;opacity:0;transition:opacity .3s;');
+      document.body.appendChild(zhud);
+
+      // ── HUD: FPS / Ping / Time (правый верхний угол) ─────────────
+      var hud = document.createElement('div');
+      hud.id  = '__esp_hud';
+      hud.setAttribute('style',
+        'position:fixed;top:6px;left:50%;transform:translateX(-50%);z-index:100001;pointer-events:none;' +
+        'font-family:"Courier New",monospace;font-size:13px;font-weight:700;' +
+        'color:#00ffcc;text-shadow:0 0 6px #00ffcc88;text-align:center;' +
+        'white-space:nowrap;display:flex;gap:16px;' +
+        'background:rgba(0,0,0,0.55);border-radius:8px;padding:3px 14px;');
+      document.body.appendChild(hud);
+      window.__espHudEl = hud;
+
+      // ── Социальное меню (левый верхний угол) — скрывается в игре ──
+      var social = document.createElement('div');
+      social.id  = '__esp_social';
+      social.innerHTML =
+        '<div style="font-family:Arial,sans-serif;background:rgba(0,0,0,0.82);' +
+        'border:1px solid rgba(255,255,255,0.15);border-radius:10px;padding:10px 16px;' +
+        'position:fixed;top:10px;left:10px;z-index:100002;min-width:160px;">' +
+        '<div style="font-weight:700;font-size:14px;color:#fff;margin-bottom:6px;letter-spacing:.04em;">MrTem_1</div>' +
+        '<a href="https://discord.gg/54An4CKt2H" target="_blank" style="display:flex;align-items:center;gap:6px;' +
+        'color:#7289da;text-decoration:none;font-size:13px;font-weight:600;margin-bottom:4px;">' +
+        '<svg width="16" height="12" viewBox="0 0 24 18" fill="#7289da"><path d="M20.3 1.5C18.7.8 17 .3 15.2.1l-.2.4c1.6.4 3 1 4.3 1.8A14.9 14.9 0 0 0 12 1C9.4 1 6.9 1.6 4.7 2.3c1.3-.8 2.7-1.4 4.3-1.8L8.8.1C7 .3 5.3.8 3.7 1.5 1.3 5 .2 8.7.1 12.3c1.9 2.7 4.8 4.4 7.9 4.6.4-.5.8-1 1-1.6-1.1-.3-2.1-.7-3-1.3l.7-.5c3.3 1.5 7.1 1.5 10.4 0l.7.5c-.9.6-2 1-3 1.3.3.6.6 1.1 1 1.6 3.1-.2 6-1.9 7.9-4.6C23.8 8.7 22.7 5 20.3 1.5zm-11.5 8.5c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm5.4 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z"/></svg>' +
+        'Discord</a>' +
+        '<a href="https://www.youtube.com/@MrTem_1/videos" target="_blank" style="display:flex;align-items:center;gap:6px;' +
+        'color:#ff4444;text-decoration:none;font-size:13px;font-weight:600;">' +
+        '<svg width="16" height="12" viewBox="0 0 24 17" fill="#ff4444"><path d="M23.5 2.7S23.2.8 22.4.1C21.4-.9 20.2-.9 19.7-.9 16.5-1 12-1 12-1s-4.5 0-7.7.1c-.5 0-1.7 0-2.7 1C.8.8.5 2.7.5 2.7S.2 4.9.2 7v2c0 2.1.3 4.3.3 4.3s.3 1.9 1.1 2.6c1 1 2.4.9 3 1C6.8 17 12 17 12 17s4.5 0 7.7-.1c.5 0 1.7 0 2.7-1 .8-.7 1.1-2.6 1.1-2.6s.3-2.2.3-4.3V7c0-2.1-.3-4.3-.3-4.3zM9.7 11.5V4.9l6.6 3.3-6.6 3.3z"/></svg>' +
+        'YouTube</a></div>';
+      document.body.appendChild(social);
+      window.__espSocialEl = social;
     }
 
     function getGameCanvas() {
       if (gameCanvas && document.body.contains(gameCanvas)) return gameCanvas;
+      // Берём САМЫЙ БОЛЬШОЙ canvas кроме нашего оверлея — это игровой WebGL canvas
       var all = document.querySelectorAll('canvas');
+      var best = null, bestArea = 0;
       for (var i = 0; i < all.length; i++) {
-        if (all[i] !== ov) { gameCanvas = all[i]; return gameCanvas; }
+        var c = all[i];
+        if (c === ov) continue;
+        var area = c.offsetWidth * c.offsetHeight;
+        if (area > bestArea) { bestArea = area; best = c; }
       }
-      return null;
+      if (best) { gameCanvas = best; }
+      return gameCanvas || null;
     }
 
-    // ── World → screen ───────────────────────────────────────────
-    // Use game canvas bounding rect so the center matches the actual rendered viewport.
+    // ── World → Screen ────────────────────────────────────────────
+    // ppu MUST use __espGameZoom — the zoom the game is actually rendering at.
+    // This keeps ESP dots exactly on top of player sprites.
+    // World → Screen: surviv.io world Y increases northward (up on screen).
+    // cx/cy  = canvas center = local player's screen position.
+    // ppu    = pixels per game unit (zoom = half-screen-height in units).
     function w2s(wx, wy, lx, ly) {
       var gc   = getGameCanvas();
       var rect = gc ? gc.getBoundingClientRect()
-                    : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+                    : { left:0, top:0, width:window.innerWidth, height:window.innerHeight };
       var cx   = rect.left + rect.width  / 2;
       var cy   = rect.top  + rect.height / 2;
-      var ppu  = (rect.height / 2) / (window.__espZoom || 28);
+      var ppu  = (rect.height / 2) / (window.__espGameZoom || 28);
+      // surviv: Y увеличивается на север (вверх), поэтому вычитаем
       return { x: cx + (wx - lx) * ppu,
                y: cy - (wy - ly) * ppu,
                ppu: ppu };
     }
 
-    // ── Z key toggle ─────────────────────────────────────────────
-    document.addEventListener('keydown', function (e) {
-      if (e.code === 'KeyZ' && !e.target.matches('input,textarea')) {
+    // ── Zoom via scroll wheel ─────────────────────────────────────
+    // We do NOT stopImmediatePropagation so the game still gets the scroll
+    // (weapon switch still works). We just record the desired multiplier;
+    // it takes effect on the next zoom packet from the server.
+    var ZOOM_MIN  = 0.5;
+    var ZOOM_MAX  = 6;
+    var ZOOM_STEP = 1.18;
+
+    function showZoomHUD() {
+      var el = document.getElementById('__esp_zoom_hud');
+      if (!el) return;
+      var z = window.__espZoomMult;
+      var lbl = z > 1.01   ? ('🔭 ×' + z.toFixed(1) + ' дальше')
+              : z < 0.99   ? ('🔍 ×' + (1/z).toFixed(1) + ' ближе')
+              :               ('👁 ×1  норм');
+      el.textContent = lbl;
+      el.style.opacity = '1';
+      clearTimeout(window.__espZHFade);
+      window.__espZHFade = setTimeout(function () {
+        if (el) el.style.opacity = '0';
+      }, 1600);
+    }
+
+    // Capture phase on window — runs before game listener
+    // passive:false — нужно для preventDefault (блокировка смены оружия)
+    window.addEventListener('wheel', function (e) {
+      // Пропускаем скролл в меню ESP
+      if (e.target.closest && e.target.closest('#__esp_menu')) return;
+
+      // Работаем только если идёт игра (есть активный игрок)
+      if (!window.__espActiveId || !window.__espPlayers || window.__espPlayers.size === 0) return;
+
+      // Меняем множитель зума ESP
+      if (e.deltaY < 0) {
+        window.__espZoomMult = Math.min(window.__espZoomMult * ZOOM_STEP, ZOOM_MAX);
+      } else {
+        window.__espZoomMult = Math.max(window.__espZoomMult / ZOOM_STEP, ZOOM_MIN);
+      }
+      // Сразу применяем к __espGameZoom (ESP оверлей)
+      // Игровая камера обновится при следующем пакете зума от сервера
+      window.__espGameZoom = (window.__espZoom || 28) * window.__espZoomMult;
+
+      showZoomHUD();
+      // Синхронизируем слайдер зума в меню
+      if (window.__espZoomProxy && window.__espZoomCtrl) {
+        window.__espZoomProxy.zoom = Math.round((window.__espZoomMult || 1) * 100);
+        window.__espZoomCtrl.updateDisplay();
+      }
+      // Блокируем смену оружия колесиком пока идёт игра
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, { passive: false, capture: true });
+
+    // ── Key binds ─────────────────────────────────────────────────
+    // __espBindCapture = { cfgKey, onBind } while waiting for a key press
+    window.__espBindCapture = null;
+
+    window.addEventListener('keydown', function (e) {
+      // ── Keybind capture mode ───────────────────────────────────
+      // ВАЖНО: проверяем захват ДО фильтра input/textarea,
+      // иначе dat.GUI фокусирует <input> и клавиша никогда не захватывается.
+      if (window.__espBindCapture) {
+        var cap = window.__espBindCapture;
+        window.__espBindCapture = null;
+        // ignore Escape = cancel
+        if (e.code !== 'Escape') {
+          CFG[cap.cfgKey] = e.code;
+          if (cap.onBind) cap.onBind(e.code);
+        } else {
+          if (cap.onCancel) cap.onCancel();
+        }
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        return;
+      }
+      // Игнорируем нажатия в текстовых полях для обычных биндов
+      if (e.target && e.target.matches('input,textarea')) return;
+      // ── Normal binds ───────────────────────────────────────────
+      if (e.code === CFG.keyAimbot) {
         CFG.aimbotOn = !CFG.aimbotOn;
         window.__espAimbot = CFG.aimbotOn;
         var btn = document.getElementById('__esp_ab_btn');
         if (btn) updateAimbotBtn(btn);
-        console.log('[ESP] Aimbot:', CFG.aimbotOn ? 'ON' : 'OFF');
+        e.stopImmediatePropagation();
+        e.preventDefault();
       }
-    });
+      if (e.code === CFG.keyLoot) {
+        CFG.autoLoot = !CFG.autoLoot;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }
+      if (e.code === 'KeyM') {
+        CFG.mouseFOV = !CFG.mouseFOV;
+        syncTog('__e_mfov', CFG.mouseFOV, true);
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }
+    }, true);
 
-    // ── Find best aimbot target ──────────────────────────────────
+    // ── Prediction ────────────────────────────────────────────────
+    function getPredicted(p, ms) {
+      if (!CFG.predict) return p.pos;
+      var v = window.__espVels.get(p.__id);
+      if (!v) return p.pos;
+      var age = performance.now() - v.lastTime;
+      if (age > 500) return p.pos;
+      var lead = (ms + age) / 1000;
+      return { x: p.pos.x + v.vx * lead, y: p.pos.y + v.vy * lead };
+    }
+
+    // ── Find best aimbot target ───────────────────────────────────
     function findTarget(lx, ly, lTeam) {
-      var players  = window.__espPlayers;
-      var localId  = window.__espActiveId;
-      var cx       = mouseX;
-      var cy       = mouseY;
-      var bestDist = Infinity;
-      var bestP    = null;
+      var gc   = getGameCanvas();
+      var rect = gc ? gc.getBoundingClientRect() : null;
+      var cx   = rect ? rect.left + rect.width  / 2 : window.innerWidth  / 2;
+      var cy   = rect ? rect.top  + rect.height / 2 : window.innerHeight / 2;
+      var ox   = CFG.mouseFOV ? mouseX : cx;
+      var oy   = CFG.mouseFOV ? mouseY : cy;
+      var best = null, bestD = Infinity;
 
-      players.forEach(function (p) {
-        if (!p || !p.pos) return;
-        if (p.dead || p.downed) return;
-        if (p.__id === localId) return;
-
+      window.__espPlayers.forEach(function (p) {
+        if (!p || !p.pos || p.dead || p.downed) return;
+        if (p.__id === window.__espActiveId) return;
         var info  = window.__espInfos.get(p.__id);
         var pTeam = info ? info.teamId : (p.teamId !== undefined ? p.teamId : -1);
-        var enemy = (lTeam <= 0) || (pTeam !== lTeam);
-        if (!enemy) return;
-
-        // Screen-space distance from crosshair (screen center)
-        var sp   = w2s(p.pos.x, p.pos.y, lx, ly);
-        var dx   = sp.x - cx;
-        var dy   = sp.y - cy;
-        var dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist < CFG.aimbotFOV && dist < bestDist) {
-          bestDist = dist;
-          bestP    = p;
-        }
+        if ((lTeam > 0) && (pTeam === lTeam)) return; // teammate
+        var pred = getPredicted(p, CFG.predictMs);
+        var sp   = w2s(pred.x, pred.y, lx, ly);
+        var dx   = sp.x - ox, dy = sp.y - oy;
+        var d    = Math.sqrt(dx*dx + dy*dy);
+        if (d < CFG.aimbotFOV && d < bestD) { bestD = d; best = p; }
       });
-      return bestP;
+      return best;
     }
 
-    // ── Aim at target ─────────────────────────────────────────────
-    // Dispatch a synthetic mousemove to the game canvas at the
-    // target's screen position so the game updates its aim direction.
-    function aimAt(sx, sy) {
-      var gc = getGameCanvas();
-      if (!gc) return;
-      var rect = gc.getBoundingClientRect();
-      // Clamp within canvas bounds
-      var cx = Math.max(rect.left + 1, Math.min(rect.right  - 1, sx));
-      var cy = Math.max(rect.top  + 1, Math.min(rect.bottom - 1, sy));
-      try {
-        gc.dispatchEvent(new MouseEvent('mousemove', {
-          clientX: cx, clientY: cy,
-          bubbles: true, cancelable: true,
-          view: window
-        }));
-      } catch (_) {}
-    }
+    // aimAt больше не используется — аимбот работает через eg.prototype.serialize
 
-    // ── Draw one ESP player ────────────────────────────────────────
+    // ── Draw player ───────────────────────────────────────────────
     function drawPlayer(p, lx, ly, lTeam, targetId) {
       if (!p || !p.pos || p.dead || p.downed) return;
       if (p.__id === window.__espActiveId) return;
@@ -90182,291 +90471,1969 @@ if (!window.__ESP_LOADED) {
       var enemy = (lTeam <= 0) || (pTeam !== lTeam);
       if (!enemy && !CFG.teammates) return;
 
-      var col = enemy ? CFG.enemyCol : CFG.teamCol;
-      if (p.__id === targetId) col = CFG.aimCol; // highlight aimbot target
+      var isTarget = (p.__id === targetId);
+      var col      = enemy ? CFG.enemyCol : CFG.teamCol;
+      if (isTarget) col = CFG.aimCol;
 
-      var sp  = w2s(p.pos.x, p.pos.y, lx, ly);
-      var W   = window.innerWidth;
-      var H   = window.innerHeight;
-
-      if (sp.x < -300 || sp.x > W + 300 || sp.y < -300 || sp.y > H + 300) return;
-
-      var bH = Math.max(26, sp.ppu * 2.2);
-      var bW = bH * 0.6;
-      var bx = sp.x - bW / 2;
-      var by = sp.y - bH / 2;
+      // Use current (non-predicted) position for the visual box/dot
+      var sp = w2s(p.pos.x, p.pos.y, lx, ly);
+      var W  = window.innerWidth, H = window.innerHeight;
+      if (sp.x < -300 || sp.x > W+300 || sp.y < -300 || sp.y > H+300) return;
 
       ctx.save();
-      ctx.globalAlpha = 0.93;
 
-      if (CFG.boxes) {
-        ctx.shadowColor = col; ctx.shadowBlur = 5;
-        ctx.strokeStyle = col; ctx.lineWidth  = (p.__id === targetId) ? 2.5 : 1.8;
-        ctx.strokeRect(bx, by, bW, bH);
+      // ── Dot on player position ────────────────────────────────
+      ctx.globalAlpha = isTarget ? 1 : 0.85;
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, isTarget ? 5 : 3.5, 0, Math.PI*2);
+      ctx.fillStyle   = col;
+      ctx.shadowColor = col;
+      ctx.shadowBlur  = isTarget ? 16 : 7;
+      ctx.fill();
+      ctx.shadowBlur  = 0;
 
-        var cs = 6; ctx.lineWidth = 2.5; ctx.shadowBlur = 2;
-        var corners = [[bx, by, 1, 1], [bx + bW, by, -1, 1],
-                       [bx, by + bH, 1, -1], [bx + bW, by + bH, -1, -1]];
-        for (var ci = 0; ci < corners.length; ci++) {
-          var c = corners[ci];
-          ctx.beginPath();
-          ctx.moveTo(c[0] + c[2] * cs, c[1]);
-          ctx.lineTo(c[0], c[1]);
-          ctx.lineTo(c[0], c[1] + c[3] * cs);
-          ctx.stroke();
-        }
-        ctx.shadowBlur = 0;
+      // ── Snapline to player (goes TO the player dot, not past it) ─
+      if (CFG.lines) {
+        var gc2  = getGameCanvas();
+        var rec2 = gc2 ? gc2.getBoundingClientRect() : null;
+        // Линия от центра экрана (позиция своего игрока) → к врагу
+        var lineOx = rec2 ? rec2.left + rec2.width/2  : W/2;
+        var lineOy = rec2 ? rec2.top  + rec2.height/2 : H/2;
+
+        var grad = ctx.createLinearGradient(lineOx, lineOy, sp.x, sp.y);
+        grad.addColorStop(0,   'rgba(0,0,0,0)');
+        grad.addColorStop(0.6, col + '44');
+        grad.addColorStop(1,   col + 'cc');
+
+        ctx.globalAlpha = isTarget ? 0.95 : 0.55;
+        ctx.beginPath();
+        ctx.moveTo(lineOx, lineOy);
+        ctx.lineTo(sp.x,   sp.y);         // ends EXACTLY at player position
+        ctx.strokeStyle = grad;
+        ctx.lineWidth   = isTarget ? 1.8 : 1;
+        ctx.shadowColor = col;
+        ctx.shadowBlur  = isTarget ? 6 : 2;
+        ctx.stroke();
+        ctx.shadowBlur  = 0;
       }
 
-      // Aimbot lock indicator — triangle above box
-      if (p.__id === targetId) {
-        ctx.fillStyle = CFG.aimCol;
-        ctx.shadowColor = CFG.aimCol; ctx.shadowBlur = 8;
+      // ── Prediction arrow ──────────────────────────────────────
+      if (CFG.predict) {
+        var pred = getPredicted(p, CFG.predictMs);
+        if (pred !== p.pos) {
+          var psp = w2s(pred.x, pred.y, lx, ly);
+          if (Math.abs(psp.x-sp.x) > 3 || Math.abs(psp.y-sp.y) > 3) {
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(sp.x, sp.y);
+            ctx.lineTo(psp.x, psp.y);
+            ctx.strokeStyle = '#ffffff88';
+            ctx.lineWidth   = 1;
+            ctx.setLineDash([3, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            // dot at predicted pos
+            ctx.beginPath();
+            ctx.arc(psp.x, psp.y, 2.5, 0, Math.PI*2);
+            ctx.fillStyle = '#ffffff88';
+            ctx.fill();
+          }
+        }
+      }
+
+      // ── Lock triangle above target ────────────────────────────
+      if (isTarget) {
+        var topY = sp.y - Math.max(20, sp.ppu*1.9)/2 - 14;
+        ctx.globalAlpha = 1;
+        ctx.fillStyle   = CFG.aimCol;
+        ctx.shadowColor = CFG.aimCol;
+        ctx.shadowBlur  = 14;
         ctx.beginPath();
-        ctx.moveTo(sp.x, by - 14);
-        ctx.lineTo(sp.x - 7, by - 6);
-        ctx.lineTo(sp.x + 7, by - 6);
+        ctx.moveTo(sp.x,    topY);
+        ctx.lineTo(sp.x-7,  topY-9);
+        ctx.lineTo(sp.x+7,  topY-9);
         ctx.closePath();
         ctx.fill();
         ctx.shadowBlur = 0;
       }
 
-      if (CFG.distance) {
-        var dist = Math.round(Math.hypot(p.pos.x - lx, p.pos.y - ly));
-        ctx.font        = 'bold 11px Arial';
-        ctx.textAlign   = 'center';
-        ctx.fillStyle   = col;
-        ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 4;
-        ctx.fillText(dist + 'm', sp.x, by + bH + 13);
-        ctx.shadowBlur  = 0;
-      }
-
-      if (CFG.snaplines) {
-        ctx.beginPath();
-        ctx.moveTo(W / 2, H / 2);
-        ctx.lineTo(sp.x, sp.y);
-        ctx.strokeStyle = col + '55'; ctx.lineWidth = 0.8;
-        ctx.stroke();
-      }
+      // Distance removed per user request
 
       ctx.restore();
     }
 
-    // ── Aimbot FOV circle ─────────────────────────────────────────
-    function drawFOV() {
+    // ── Draw FOV ──────────────────────────────────────────────────
+    // Белый, без градиентов и теней — без лагов
+    function drawFOV(hasTarget) {
       if (!CFG.aimbotOn) return;
+      var gc   = getGameCanvas();
+      var rect = gc ? gc.getBoundingClientRect() : null;
+      var cx   = rect ? rect.left + rect.width/2  : window.innerWidth/2;
+      var cy   = rect ? rect.top  + rect.height/2 : window.innerHeight/2;
+      var fx   = CFG.mouseFOV ? mouseX : cx;
+      var fy   = CFG.mouseFOV ? mouseY : cy;
+      var r    = CFG.aimbotFOV;
+
       ctx.save();
-      ctx.globalAlpha = 0.18;
-      ctx.strokeStyle = CFG.aimCol;
-      ctx.lineWidth   = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.arc(mouseX, mouseY, CFG.aimbotFOV, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.globalAlpha  = hasTarget ? 0.95 : 0.45;
+      ctx.strokeStyle  = '#ffffff';
+      ctx.lineWidth    = hasTarget ? 1.6 : 1.2;
       ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+      ctx.beginPath();
+      ctx.arc(fx, fy, r, 0, Math.PI*2);
+      ctx.stroke();
+
+      // Прицел в режиме Mouse FOV
+      if (CFG.mouseFOV) {
+        var arm = 9, gap = 3;
+        ctx.beginPath();
+        ctx.moveTo(fx-arm,fy); ctx.lineTo(fx-gap,fy);
+        ctx.moveTo(fx+gap,fy); ctx.lineTo(fx+arm,fy);
+        ctx.moveTo(fx,fy-arm); ctx.lineTo(fx,fy-gap);
+        ctx.moveTo(fx,fy+gap); ctx.lineTo(fx,fy+arm);
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
     // ── Main loop ─────────────────────────────────────────────────
-    var lastAimTime = 0;
-
     function loop() {
       requestAnimationFrame(loop);
       if (!ov || !ctx) return;
-
       ov.width  = window.innerWidth;
       ov.height = window.innerHeight;
 
-      var players = window.__espPlayers;
-      var localId = window.__espActiveId;
-      if (!players || players.size === 0 || !localId) return;
-
-      var localObj = players.get(localId);
-      if (!localObj || !localObj.pos) return;
-
-      var lx = localObj.pos.x;
-      var ly = localObj.pos.y;
-
-      var localInfo = window.__espInfos.get(localId);
-      var lTeam     = localInfo ? localInfo.teamId
-                    : (localObj.teamId !== undefined ? localObj.teamId : -1);
-
-      // Aimbot
-      var targetId = 0;
-      if (CFG.aimbotOn) {
-        var target = findTarget(lx, ly, lTeam);
-        if (target && target.pos) {
-          targetId = target.__id;
-          var tsp = w2s(target.pos.x, target.pos.y, lx, ly);
-          // Throttle aim events to ~60/s max
-          var now = performance.now();
-          if (now - lastAimTime > 16) {
-            aimAt(tsp.x, tsp.y);
-            lastAimTime = now;
-          }
+      // ── Inactivity reset: no server packets for 9s = lobby/dead ──
+      // Only check if we had an active game before
+      if (window.__espActiveId && window.__espLastPkt) {
+        if (performance.now() - window.__espLastPkt > 9000) {
+          window.__espReset();
         }
       }
 
-      // Draw FOV circle
-      drawFOV();
+      var players = window.__espPlayers;
+      var localId = window.__espActiveId;
 
-      // ESP
-      if (CFG.espOn) {
-        players.forEach(function (p) {
-          try { drawPlayer(p, lx, ly, lTeam, targetId); } catch (_) {}
-        });
+      // ── FPS (считаем всегда, в том числе в лобби) ────────────
+      window.__espFpsCount++;
+      var nowFps2 = performance.now();
+      if (nowFps2 - window.__espFpsLast >= 500) {
+        window.__espFPS      = Math.round(window.__espFpsCount * 1000 / (nowFps2 - window.__espFpsLast));
+        window.__espFpsCount = 0;
+        window.__espFpsLast  = nowFps2;
       }
+      if (window.__espHudEl) {
+        var _t = new Date();
+        var _h = _t.getHours().toString().padStart(2,'0');
+        var _m = _t.getMinutes().toString().padStart(2,'0');
+        var _s = _t.getSeconds().toString().padStart(2,'0');
+        window.__espHudEl.innerHTML =
+          '<span>' + window.__espFPS  + ' FPS</span>' +
+          '<span>' + window.__espPing + ' ms</span>' +
+          '<span>' + _h + ':' + _m + ':' + _s + '</span>';
+      }
+
+      // Nothing to show — lobby or between matches
+      if (!players || players.size === 0 || !localId) {
+        // Показываем социальное меню в лобби
+        if (window.__espSocialEl) window.__espSocialEl.style.display = '';
+        return;
+      }
+
+      var local = players.get(localId);
+
+      // Local player doesn't exist or is dead → wipe + stop
+      if (!local || !local.pos || local.dead || local.downed) {
+        if (local && (local.dead || local.downed)) {
+          window.__espReset();
+        }
+        // Показываем социальное меню после смерти/победы
+        if (window.__espSocialEl) window.__espSocialEl.style.display = '';
+        return;
+      }
+
+      var lx        = local.pos.x, ly = local.pos.y;
+      var localInfo = window.__espInfos.get(localId);
+      var lTeam     = localInfo ? localInfo.teamId
+                    : (local.teamId !== undefined ? local.teamId : -1);
+
+      var targetId = 0, target = null;
+      if (CFG.aimbotOn) {
+        target = findTarget(lx, ly, lTeam);
+        if (target && target.pos) {
+          targetId = target.__id;
+          // Используем предсказанную позицию для прицеливания
+          var pred = getPredicted(target, CFG.predictMs);
+          // Сохраняем предсказанную позицию как цель для serialize-хука
+          window.__espAimbotTarget = { pos: pred, __id: target.__id };
+        } else {
+          window.__espAimbotTarget = null;
+        }
+      } else {
+        window.__espAimbotTarget = null;
+      }
+
+      // ── Auto-Loot через файлы игры ───────────────────────────
+      // Флаг читается в eg.prototype.serialize — addInput(10/7) прямо в пакет
+      if (CFG.autoLoot && local && local.pos) {
+        var lootFound2 = false;
+        window.__espLoot.forEach(function (lobj) {
+          if (!lobj || !lobj.pos) return;
+          var dx3 = lobj.pos.x - lx, dy3 = lobj.pos.y - ly;
+          // maxInteractionRad = 3.5 (из файлов игры)
+          if (Math.sqrt(dx3*dx3 + dy3*dy3) <= 3.5) lootFound2 = true;
+        });
+        window.__espAutoLootActive = lootFound2;
+      } else {
+        window.__espAutoLootActive = false;
+      }
+
+      // ── FOV круг аимбота ─────────────────────────────────────
+      drawFOV(!!target);
+
+      // ── Социальное меню скрыто в игре ────────────────────────
+      if (window.__espSocialEl) window.__espSocialEl.style.display = 'none';
     }
 
-    // ── Menu ──────────────────────────────────────────────────────
-    function updateAimbotBtn(btn) {
-      btn.textContent = CFG.aimbotOn ? '🎯 Аимбот: ВКЛ' : '🎯 Аимбот: ВЫКЛ';
-      btn.style.background = CFG.aimbotOn
-        ? 'rgba(255,220,0,0.2)' : 'rgba(255,255,255,0.06)';
-      btn.style.borderColor = CFG.aimbotOn
-        ? 'rgba(255,220,0,0.55)' : 'rgba(255,255,255,0.15)';
-      btn.style.color = CFG.aimbotOn ? '#ffee00' : '#888';
+! function (e, t) {
+    "object" == typeof exports && "undefined" != typeof module ? t(exports) : "function" == typeof define && define.amd ? define(["exports"], t) : t(e.dat = {})
+}(typeof window !== "undefined" ? window : globalThis, function (e) {
+    "use strict";
+
+    function t(e, t) {
+        var n = e.__state.conversionName.toString(),
+            o = Math.round(e.r),
+            i = Math.round(e.g),
+            r = Math.round(e.b),
+            s = e.a,
+            a = Math.round(e.h),
+            l = e.s.toFixed(1),
+            d = e.v.toFixed(1);
+        if (t || "THREE_CHAR_HEX" === n || "SIX_CHAR_HEX" === n) {
+            for (var c = e.hex.toString(16); c.length < 6;) c = "0" + c;
+            return "#" + c
+        }
+        return "CSS_RGB" === n ? "rgb(" + o + "," + i + "," + r + ")" : "CSS_RGBA" === n ? "rgba(" + o + "," + i + "," + r + "," + s + ")" : "HEX" === n ? "0x" + e.hex.toString(16) : "RGB_ARRAY" === n ? "[" + o + "," + i + "," + r + "]" : "RGBA_ARRAY" === n ? "[" + o + "," + i + "," + r + "," + s + "]" : "RGB_OBJ" === n ? "{r:" + o + ",g:" + i + ",b:" + r + "}" : "RGBA_OBJ" === n ? "{r:" + o + ",g:" + i + ",b:" + r + ",a:" + s + "}" : "HSV_OBJ" === n ? "{h:" + a + ",s:" + l + ",v:" + d + "}" : "HSVA_OBJ" === n ? "{h:" + a + ",s:" + l + ",v:" + d + ",a:" + s + "}" : "unknown format"
+    }
+
+    function n(e, t, n) {
+        Object.defineProperty(e, t, {
+            get: function () {
+                return "RGB" === this.__state.space ? this.__state[t] : (I.recalculateRGB(this, t, n), this.__state[t])
+            },
+            set: function (e) {
+                "RGB" !== this.__state.space && (I.recalculateRGB(this, t, n), this.__state.space = "RGB"), this.__state[t] = e
+            }
+        })
+    }
+
+    function o(e, t) {
+        Object.defineProperty(e, t, {
+            get: function () {
+                return "HSV" === this.__state.space ? this.__state[t] : (I.recalculateHSV(this), this.__state[t])
+            },
+            set: function (e) {
+                "HSV" !== this.__state.space && (I.recalculateHSV(this), this.__state.space = "HSV"), this.__state[t] = e
+            }
+        })
+    }
+
+    function i(e) {
+        if ("0" === e || S.isUndefined(e)) return 0;
+        var t = e.match(U);
+        return S.isNull(t) ? 0 : parseFloat(t[1])
+    }
+
+    function r(e) {
+        var t = e.toString();
+        return t.indexOf(".") > -1 ? t.length - t.indexOf(".") - 1 : 0
+    }
+
+    function s(e, t) {
+        var n = Math.pow(10, t);
+        return Math.round(e * n) / n
+    }
+
+    function a(e, t, n, o, i) {
+        return o + (e - t) / (n - t) * (i - o)
+    }
+
+    function l(e, t, n, o) {
+        e.style.background = "", S.each(ee, function (i) {
+            e.style.cssText += "background: " + i + "linear-gradient(" + t + ", " + n + " 0%, " + o + " 100%); "
+        })
+    }
+
+    function d(e) {
+        e.style.background = "", e.style.cssText += "background: -moz-linear-gradient(top,  #ff0000 0%, #ff00ff 17%, #0000ff 34%, #00ffff 50%, #00ff00 67%, #ffff00 84%, #ff0000 100%);", e.style.cssText += "background: -webkit-linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);", e.style.cssText += "background: -o-linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);", e.style.cssText += "background: -ms-linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);", e.style.cssText += "background: linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);"
+    }
+
+    function c(e, t, n) {
+        var o = document.createElement("li");
+        return t && o.appendChild(t), n ? e.__ul.insertBefore(o, n) : e.__ul.appendChild(o), e.onResize(), o
+    }
+
+    function u(e) {
+        X.unbind(window, "resize", e.__resizeHandler), e.saveToLocalStorageIfPossible && X.unbind(window, "unload", e.saveToLocalStorageIfPossible)
+    }
+
+    function _(e, t) {
+        var n = e.__preset_select[e.__preset_select.selectedIndex];
+        n.innerHTML = t ? n.value + "*" : n.value
+    }
+
+    function h(e, t, n) {
+        if (n.__li = t, n.__gui = e, S.extend(n, {
+                options: function (t) {
+                    if (arguments.length > 1) {
+                        var o = n.__li.nextElementSibling;
+                        return n.remove(), f(e, n.object, n.property, {
+                            before: o,
+                            factoryArgs: [S.toArray(arguments)]
+                        })
+                    }
+                    if (S.isArray(t) || S.isObject(t)) {
+                        var i = n.__li.nextElementSibling;
+                        return n.remove(), f(e, n.object, n.property, {
+                            before: i,
+                            factoryArgs: [t]
+                        })
+                    }
+                },
+                name: function (e) {
+                    return n.__li.firstElementChild.firstElementChild.innerHTML = e, n
+                },
+                listen: function () {
+                    return n.__gui.listen(n), n
+                },
+                remove: function () {
+                    return n.__gui.remove(n), n
+                }
+            }), n instanceof q) {
+            var o = new Q(n.object, n.property, {
+                min: n.__min,
+                max: n.__max,
+                step: n.__step
+            });
+            S.each(["updateDisplay", "onChange", "onFinishChange", "step", "min", "max"], function (e) {
+                var t = n[e],
+                    i = o[e];
+                n[e] = o[e] = function () {
+                    var e = Array.prototype.slice.call(arguments);
+                    return i.apply(o, e), t.apply(n, e)
+                }
+            }), X.addClass(t, "has-slider"), n.domElement.insertBefore(o.domElement, n.domElement.firstElementChild)
+        } else if (n instanceof Q) {
+            var i = function (t) {
+                if (S.isNumber(n.__min) && S.isNumber(n.__max)) {
+                    var o = n.__li.firstElementChild.firstElementChild.innerHTML,
+                        i = n.__gui.__listening.indexOf(n) > -1;
+                    n.remove();
+                    var r = f(e, n.object, n.property, {
+                        before: n.__li.nextElementSibling,
+                        factoryArgs: [n.__min, n.__max, n.__step]
+                    });
+                    return r.name(o), i && r.listen(), r
+                }
+                return t
+            };
+            n.min = S.compose(i, n.min), n.max = S.compose(i, n.max)
+        } else n instanceof K ? (X.bind(t, "click", function () {
+            X.fakeEvent(n.__checkbox, "click")
+        }), X.bind(n.__checkbox, "click", function (e) {
+            e.stopPropagation()
+        })) : n instanceof Z ? (X.bind(t, "click", function () {
+            X.fakeEvent(n.__button, "click")
+        }), X.bind(t, "mouseover", function () {
+            X.addClass(n.__button, "hover")
+        }), X.bind(t, "mouseout", function () {
+            X.removeClass(n.__button, "hover")
+        })) : n instanceof $ && (X.addClass(t, "color"), n.updateDisplay = S.compose(function (e) {
+            return t.style.borderLeftColor = n.__color.toString(), e
+        }, n.updateDisplay), n.updateDisplay());
+        n.setValue = S.compose(function (t) {
+            return e.getRoot().__preset_select && n.isModified() && _(e.getRoot(), !0), t
+        }, n.setValue)
+    }
+
+    function p(e, t) {
+        var n = e.getRoot(),
+            o = n.__rememberedObjects.indexOf(t.object);
+        if (-1 !== o) {
+            var i = n.__rememberedObjectIndecesToControllers[o];
+            if (void 0 === i && (i = {}, n.__rememberedObjectIndecesToControllers[o] = i), i[t.property] = t, n.load && n.load.remembered) {
+                var r = n.load.remembered,
+                    s = void 0;
+                if (r[e.preset]) s = r[e.preset];
+                else {
+                    if (!r[se]) return;
+                    s = r[se]
+                }
+                if (s[o] && void 0 !== s[o][t.property]) {
+                    var a = s[o][t.property];
+                    t.initialValue = a, t.setValue(a)
+                }
+            }
+        }
+    }
+
+    function f(e, t, n, o) {
+        if (void 0 === t[n]) throw new Error('Object "' + t + '" has no property "' + n + '"');
+        var i = void 0;
+        if (o.color) i = new $(t, n);
+        else {
+            var r = [t, n].concat(o.factoryArgs);
+            i = ne.apply(e, r)
+        }
+        o.before instanceof z && (o.before = o.before.__li), p(e, i), X.addClass(i.domElement, "c");
+        var s = document.createElement("span");
+        X.addClass(s, "property-name"), s.innerHTML = i.property;
+        var a = document.createElement("div");
+        a.appendChild(s), a.appendChild(i.domElement);
+        var l = c(e, a, o.before);
+        return X.addClass(l, he.CLASS_CONTROLLER_ROW), i instanceof $ ? X.addClass(l, "color") : X.addClass(l, H(i.getValue())), h(e, l, i), e.__controllers.push(i), i
+    }
+
+    function m(e, t) {
+        return document.location.href + "." + t
+    }
+
+    function g(e, t, n) {
+        var o = document.createElement("option");
+        o.innerHTML = t, o.value = t, e.__preset_select.appendChild(o), n && (e.__preset_select.selectedIndex = e.__preset_select.length - 1)
+    }
+
+    function b(e, t) {
+        t.style.display = e.useLocalStorage ? "block" : "none"
+    }
+
+    function v(e) {
+        var t = e.__save_row = document.createElement("li");
+        X.addClass(e.domElement, "has-save"), e.__ul.insertBefore(t, e.__ul.firstChild), X.addClass(t, "save-row");
+        var n = document.createElement("span");
+        n.innerHTML = "&nbsp;", X.addClass(n, "button gears");
+        var o = document.createElement("span");
+        o.innerHTML = "Save", X.addClass(o, "button"), X.addClass(o, "save");
+        var i = document.createElement("span");
+        i.innerHTML = "New", X.addClass(i, "button"), X.addClass(i, "save-as");
+        var r = document.createElement("span");
+        r.innerHTML = "Revert", X.addClass(r, "button"), X.addClass(r, "revert");
+        var s = e.__preset_select = document.createElement("select");
+        if (e.load && e.load.remembered ? S.each(e.load.remembered, function (t, n) {
+                g(e, n, n === e.preset)
+            }) : g(e, se, !1), X.bind(s, "change", function () {
+                for (var t = 0; t < e.__preset_select.length; t++) e.__preset_select[t].innerHTML = e.__preset_select[t].value;
+                e.preset = this.value
+            }), t.appendChild(s), t.appendChild(n), t.appendChild(o), t.appendChild(i), t.appendChild(r), ae) {
+            var a = document.getElementById("dg-local-explain"),
+                l = document.getElementById("dg-local-storage");
+            document.getElementById("dg-save-locally").style.display = "block", "true" === localStorage.getItem(m(e, "isLocal")) && l.setAttribute("checked", "checked"), b(e, a), X.bind(l, "change", function () {
+                e.useLocalStorage = !e.useLocalStorage, b(e, a)
+            })
+        }
+        var d = document.getElementById("dg-new-constructor");
+        X.bind(d, "keydown", function (e) {
+            !e.metaKey || 67 !== e.which && 67 !== e.keyCode || le.hide()
+        }), X.bind(n, "click", function () {
+            d.innerHTML = JSON.stringify(e.getSaveObject(), void 0, 2), le.show(), d.focus(), d.select()
+        }), X.bind(o, "click", function () {
+            e.save()
+        }), X.bind(i, "click", function () {
+            var t = prompt("Enter a new preset name.");
+            t && e.saveAs(t)
+        }), X.bind(r, "click", function () {
+            e.revert()
+        })
+    }
+
+    function y(e) {
+        function t(t) {
+            return t.preventDefault(), e.width += i - t.clientX, e.onResize(), i = t.clientX, !1
+        }
+
+        function n() {
+            X.removeClass(e.__closeButton, he.CLASS_DRAG), X.unbind(window, "mousemove", t), X.unbind(window, "mouseup", n)
+        }
+
+        function o(o) {
+            return o.preventDefault(), i = o.clientX, X.addClass(e.__closeButton, he.CLASS_DRAG), X.bind(window, "mousemove", t), X.bind(window, "mouseup", n), !1
+        }
+        var i = void 0;
+        e.__resize_handle = document.createElement("div"), S.extend(e.__resize_handle.style, {
+            width: "6px",
+            marginLeft: "-3px",
+            height: "200px",
+            cursor: "ew-resize",
+            position: "absolute"
+        }), X.bind(e.__resize_handle, "mousedown", o), X.bind(e.__closeButton, "mousedown", o), e.domElement.insertBefore(e.__resize_handle, e.domElement.firstElementChild)
+    }
+
+    function w(e, t) {
+        e.domElement.style.width = t + "px", e.__save_row && e.autoPlace && (e.__save_row.style.width = t + "px"), e.__closeButton && (e.__closeButton.style.width = t + "px")
+    }
+
+    function x(e, t) {
+        var n = {};
+        return S.each(e.__rememberedObjects, function (o, i) {
+            var r = {},
+                s = e.__rememberedObjectIndecesToControllers[i];
+            S.each(s, function (e, n) {
+                r[n] = t ? e.initialValue : e.getValue()
+            }), n[i] = r
+        }), n
+    }
+
+    function E(e) {
+        for (var t = 0; t < e.__preset_select.length; t++) e.__preset_select[t].value === e.preset && (e.__preset_select.selectedIndex = t)
+    }
+
+    function C(e) {
+        0 !== e.length && oe.call(window, function () {
+            C(e)
+        }), S.each(e, function (e) {
+            e.updateDisplay()
+        })
+    }
+    var A = Array.prototype.forEach,
+        k = Array.prototype.slice,
+        S = {
+            BREAK: {},
+            extend: function (e) {
+                return this.each(k.call(arguments, 1), function (t) {
+                    (this.isObject(t) ? Object.keys(t) : []).forEach(function (n) {
+                        this.isUndefined(t[n]) || (e[n] = t[n])
+                    }.bind(this))
+                }, this), e
+            },
+            defaults: function (e) {
+                return this.each(k.call(arguments, 1), function (t) {
+                    (this.isObject(t) ? Object.keys(t) : []).forEach(function (n) {
+                        this.isUndefined(e[n]) && (e[n] = t[n])
+                    }.bind(this))
+                }, this), e
+            },
+            compose: function () {
+                var e = k.call(arguments);
+                return function () {
+                    for (var t = k.call(arguments), n = e.length - 1; n >= 0; n--) t = [e[n].apply(this, t)];
+                    return t[0]
+                }
+            },
+            each: function (e, t, n) {
+                if (e)
+                    if (A && e.forEach && e.forEach === A) e.forEach(t, n);
+                    else if (e.length === e.length + 0) {
+                    var o = void 0,
+                        i = void 0;
+                    for (o = 0, i = e.length; o < i; o++)
+                        if (o in e && t.call(n, e[o], o) === this.BREAK) return
+                } else
+                    for (var r in e)
+                        if (t.call(n, e[r], r) === this.BREAK) return
+            },
+            defer: function (e) {
+                setTimeout(e, 0)
+            },
+            debounce: function (e, t, n) {
+                var o = void 0;
+                return function () {
+                    var i = this,
+                        r = arguments,
+                        s = n || !o;
+                    clearTimeout(o), o = setTimeout(function () {
+                        o = null, n || e.apply(i, r)
+                    }, t), s && e.apply(i, r)
+                }
+            },
+            toArray: function (e) {
+                return e.toArray ? e.toArray() : k.call(e)
+            },
+            isUndefined: function (e) {
+                return void 0 === e
+            },
+            isNull: function (e) {
+                return null === e
+            },
+            isNaN: function (e) {
+                function t(t) {
+                    return e.apply(this, arguments)
+                }
+                return t.toString = function () {
+                    return e.toString()
+                }, t
+            }(function (e) {
+                return isNaN(e)
+            }),
+            isArray: Array.isArray || function (e) {
+                return e.constructor === Array
+            },
+            isObject: function (e) {
+                return e === Object(e)
+            },
+            isNumber: function (e) {
+                return e === e + 0
+            },
+            isString: function (e) {
+                return e === e + ""
+            },
+            isBoolean: function (e) {
+                return !1 === e || !0 === e
+            },
+            isFunction: function (e) {
+                return e instanceof Function
+            }
+        },
+        O = [{
+            litmus: S.isString,
+            conversions: {
+                THREE_CHAR_HEX: {
+                    read: function (e) {
+                        var t = e.match(/^#([A-F0-9])([A-F0-9])([A-F0-9])$/i);
+                        return null !== t && {
+                            space: "HEX",
+                            hex: parseInt("0x" + t[1].toString() + t[1].toString() + t[2].toString() + t[2].toString() + t[3].toString() + t[3].toString(), 0)
+                        }
+                    },
+                    write: t
+                },
+                SIX_CHAR_HEX: {
+                    read: function (e) {
+                        var t = e.match(/^#([A-F0-9]{6})$/i);
+                        return null !== t && {
+                            space: "HEX",
+                            hex: parseInt("0x" + t[1].toString(), 0)
+                        }
+                    },
+                    write: t
+                },
+                CSS_RGB: {
+                    read: function (e) {
+                        var t = e.match(/^rgb\(\s*(\S+)\s*,\s*(\S+)\s*,\s*(\S+)\s*\)/);
+                        return null !== t && {
+                            space: "RGB",
+                            r: parseFloat(t[1]),
+                            g: parseFloat(t[2]),
+                            b: parseFloat(t[3])
+                        }
+                    },
+                    write: t
+                },
+                CSS_RGBA: {
+                    read: function (e) {
+                        var t = e.match(/^rgba\(\s*(\S+)\s*,\s*(\S+)\s*,\s*(\S+)\s*,\s*(\S+)\s*\)/);
+                        return null !== t && {
+                            space: "RGB",
+                            r: parseFloat(t[1]),
+                            g: parseFloat(t[2]),
+                            b: parseFloat(t[3]),
+                            a: parseFloat(t[4])
+                        }
+                    },
+                    write: t
+                }
+            }
+        }, {
+            litmus: S.isNumber,
+            conversions: {
+                HEX: {
+                    read: function (e) {
+                        return {
+                            space: "HEX",
+                            hex: e,
+                            conversionName: "HEX"
+                        }
+                    },
+                    write: function (e) {
+                        return e.hex
+                    }
+                }
+            }
+        }, {
+            litmus: S.isArray,
+            conversions: {
+                RGB_ARRAY: {
+                    read: function (e) {
+                        return 3 === e.length && {
+                            space: "RGB",
+                            r: e[0],
+                            g: e[1],
+                            b: e[2]
+                        }
+                    },
+                    write: function (e) {
+                        return [e.r, e.g, e.b]
+                    }
+                },
+                RGBA_ARRAY: {
+                    read: function (e) {
+                        return 4 === e.length && {
+                            space: "RGB",
+                            r: e[0],
+                            g: e[1],
+                            b: e[2],
+                            a: e[3]
+                        }
+                    },
+                    write: function (e) {
+                        return [e.r, e.g, e.b, e.a]
+                    }
+                }
+            }
+        }, {
+            litmus: S.isObject,
+            conversions: {
+                RGBA_OBJ: {
+                    read: function (e) {
+                        return !!(S.isNumber(e.r) && S.isNumber(e.g) && S.isNumber(e.b) && S.isNumber(e.a)) && {
+                            space: "RGB",
+                            r: e.r,
+                            g: e.g,
+                            b: e.b,
+                            a: e.a
+                        }
+                    },
+                    write: function (e) {
+                        return {
+                            r: e.r,
+                            g: e.g,
+                            b: e.b,
+                            a: e.a
+                        }
+                    }
+                },
+                RGB_OBJ: {
+                    read: function (e) {
+                        return !!(S.isNumber(e.r) && S.isNumber(e.g) && S.isNumber(e.b)) && {
+                            space: "RGB",
+                            r: e.r,
+                            g: e.g,
+                            b: e.b
+                        }
+                    },
+                    write: function (e) {
+                        return {
+                            r: e.r,
+                            g: e.g,
+                            b: e.b
+                        }
+                    }
+                },
+                HSVA_OBJ: {
+                    read: function (e) {
+                        return !!(S.isNumber(e.h) && S.isNumber(e.s) && S.isNumber(e.v) && S.isNumber(e.a)) && {
+                            space: "HSV",
+                            h: e.h,
+                            s: e.s,
+                            v: e.v,
+                            a: e.a
+                        }
+                    },
+                    write: function (e) {
+                        return {
+                            h: e.h,
+                            s: e.s,
+                            v: e.v,
+                            a: e.a
+                        }
+                    }
+                },
+                HSV_OBJ: {
+                    read: function (e) {
+                        return !!(S.isNumber(e.h) && S.isNumber(e.s) && S.isNumber(e.v)) && {
+                            space: "HSV",
+                            h: e.h,
+                            s: e.s,
+                            v: e.v
+                        }
+                    },
+                    write: function (e) {
+                        return {
+                            h: e.h,
+                            s: e.s,
+                            v: e.v
+                        }
+                    }
+                }
+            }
+        }],
+        T = void 0,
+        L = void 0,
+        R = function () {
+            L = !1;
+            var e = arguments.length > 1 ? S.toArray(arguments) : arguments[0];
+            return S.each(O, function (t) {
+                if (t.litmus(e)) return S.each(t.conversions, function (t, n) {
+                    if (T = t.read(e), !1 === L && !1 !== T) return L = T, T.conversionName = n, T.conversion = t, S.BREAK
+                }), S.BREAK
+            }), L
+        },
+        B = void 0,
+        N = {
+            hsv_to_rgb: function (e, t, n) {
+                var o = Math.floor(e / 60) % 6,
+                    i = e / 60 - Math.floor(e / 60),
+                    r = n * (1 - t),
+                    s = n * (1 - i * t),
+                    a = n * (1 - (1 - i) * t),
+                    l = [
+                        [n, a, r],
+                        [s, n, r],
+                        [r, n, a],
+                        [r, s, n],
+                        [a, r, n],
+                        [n, r, s]
+                    ][o];
+                return {
+                    r: 255 * l[0],
+                    g: 255 * l[1],
+                    b: 255 * l[2]
+                }
+            },
+            rgb_to_hsv: function (e, t, n) {
+                var o = Math.min(e, t, n),
+                    i = Math.max(e, t, n),
+                    r = i - o,
+                    s = void 0,
+                    a = void 0;
+                return 0 === i ? {
+                    h: NaN,
+                    s: 0,
+                    v: 0
+                } : (a = r / i, s = e === i ? (t - n) / r : t === i ? 2 + (n - e) / r : 4 + (e - t) / r, (s /= 6) < 0 && (s += 1), {
+                    h: 360 * s,
+                    s: a,
+                    v: i / 255
+                })
+            },
+            rgb_to_hex: function (e, t, n) {
+                var o = this.hex_with_component(0, 2, e);
+                return o = this.hex_with_component(o, 1, t), o = this.hex_with_component(o, 0, n)
+            },
+            component_from_hex: function (e, t) {
+                return e >> 8 * t & 255
+            },
+            hex_with_component: function (e, t, n) {
+                return n << (B = 8 * t) | e & ~(255 << B)
+            }
+        },
+        H = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (e) {
+            return typeof e
+        } : function (e) {
+            return e && "function" == typeof Symbol && e.constructor === Symbol && e !== Symbol.prototype ? "symbol" : typeof e
+        },
+        F = function (e, t) {
+            if (!(e instanceof t)) throw new TypeError("Cannot call a class as a function")
+        },
+        P = function () {
+            function e(e, t) {
+                for (var n = 0; n < t.length; n++) {
+                    var o = t[n];
+                    o.enumerable = o.enumerable || !1, o.configurable = !0, "value" in o && (o.writable = !0), Object.defineProperty(e, o.key, o)
+                }
+            }
+            return function (t, n, o) {
+                return n && e(t.prototype, n), o && e(t, o), t
+            }
+        }(),
+        D = function e(t, n, o) {
+            null === t && (t = Function.prototype);
+            var i = Object.getOwnPropertyDescriptor(t, n);
+            if (void 0 === i) {
+                var r = Object.getPrototypeOf(t);
+                return null === r ? void 0 : e(r, n, o)
+            }
+            if ("value" in i) return i.value;
+            var s = i.get;
+            if (void 0 !== s) return s.call(o)
+        },
+        j = function (e, t) {
+            if ("function" != typeof t && null !== t) throw new TypeError("Super expression must either be null or a function, not " + typeof t);
+            e.prototype = Object.create(t && t.prototype, {
+                constructor: {
+                    value: e,
+                    enumerable: !1,
+                    writable: !0,
+                    configurable: !0
+                }
+            }), t && (Object.setPrototypeOf ? Object.setPrototypeOf(e, t) : e.__proto__ = t)
+        },
+        V = function (e, t) {
+            if (!e) throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
+            return !t || "object" != typeof t && "function" != typeof t ? e : t
+        },
+        I = function () {
+            function e() {
+                if (F(this, e), this.__state = R.apply(this, arguments), !1 === this.__state) throw new Error("Failed to interpret color arguments");
+                this.__state.a = this.__state.a || 1
+            }
+            return P(e, [{
+                key: "toString",
+                value: function () {
+                    return t(this)
+                }
+            }, {
+                key: "toHexString",
+                value: function () {
+                    return t(this, !0)
+                }
+            }, {
+                key: "toOriginal",
+                value: function () {
+                    return this.__state.conversion.write(this)
+                }
+            }]), e
+        }();
+    I.recalculateRGB = function (e, t, n) {
+        if ("HEX" === e.__state.space) e.__state[t] = N.component_from_hex(e.__state.hex, n);
+        else {
+            if ("HSV" !== e.__state.space) throw new Error("Corrupted color state");
+            S.extend(e.__state, N.hsv_to_rgb(e.__state.h, e.__state.s, e.__state.v))
+        }
+    }, I.recalculateHSV = function (e) {
+        var t = N.rgb_to_hsv(e.r, e.g, e.b);
+        S.extend(e.__state, {
+            s: t.s,
+            v: t.v
+        }), S.isNaN(t.h) ? S.isUndefined(e.__state.h) && (e.__state.h = 0) : e.__state.h = t.h
+    }, I.COMPONENTS = ["r", "g", "b", "h", "s", "v", "hex", "a"], n(I.prototype, "r", 2), n(I.prototype, "g", 1), n(I.prototype, "b", 0), o(I.prototype, "h"), o(I.prototype, "s"), o(I.prototype, "v"), Object.defineProperty(I.prototype, "a", {
+        get: function () {
+            return this.__state.a
+        },
+        set: function (e) {
+            this.__state.a = e
+        }
+    }), Object.defineProperty(I.prototype, "hex", {
+        get: function () {
+            return "HEX" !== this.__state.space && (this.__state.hex = N.rgb_to_hex(this.r, this.g, this.b), this.__state.space = "HEX"), this.__state.hex
+        },
+        set: function (e) {
+            this.__state.space = "HEX", this.__state.hex = e
+        }
+    });
+    var z = function () {
+            function e(t, n) {
+                F(this, e), this.initialValue = t[n], this.domElement = document.createElement("div"), this.object = t, this.property = n, this.__onChange = void 0, this.__onFinishChange = void 0
+            }
+            return P(e, [{
+                key: "onChange",
+                value: function (e) {
+                    return this.__onChange = e, this
+                }
+            }, {
+                key: "onFinishChange",
+                value: function (e) {
+                    return this.__onFinishChange = e, this
+                }
+            }, {
+                key: "setValue",
+                value: function (e) {
+                    return this.object[this.property] = e, this.__onChange && this.__onChange.call(this, e), this.updateDisplay(), this
+                }
+            }, {
+                key: "getValue",
+                value: function () {
+                    return this.object[this.property]
+                }
+            }, {
+                key: "updateDisplay",
+                value: function () {
+                    return this
+                }
+            }, {
+                key: "isModified",
+                value: function () {
+                    return this.initialValue !== this.getValue()
+                }
+            }]), e
+        }(),
+        M = {
+            HTMLEvents: ["change"],
+            MouseEvents: ["click", "mousemove", "mousedown", "mouseup", "mouseover"],
+            KeyboardEvents: ["keydown"]
+        },
+        G = {};
+    S.each(M, function (e, t) {
+        S.each(e, function (e) {
+            G[e] = t
+        })
+    });
+    var U = /(\d+(\.\d+)?)px/,
+        X = {
+            makeSelectable: function (e, t) {
+                void 0 !== e && void 0 !== e.style && (e.onselectstart = t ? function () {
+                    return !1
+                } : function () {}, e.style.MozUserSelect = t ? "auto" : "none", e.style.KhtmlUserSelect = t ? "auto" : "none", e.unselectable = t ? "on" : "off")
+            },
+            makeFullscreen: function (e, t, n) {
+                var o = n,
+                    i = t;
+                S.isUndefined(i) && (i = !0), S.isUndefined(o) && (o = !0), e.style.position = "absolute", i && (e.style.left = 0, e.style.right = 0), o && (e.style.top = 0, e.style.bottom = 0)
+            },
+            fakeEvent: function (e, t, n, o) {
+                var i = n || {},
+                    r = G[t];
+                if (!r) throw new Error("Event type " + t + " not supported.");
+                var s = document.createEvent(r);
+                switch (r) {
+                case "MouseEvents":
+                    var a = i.x || i.clientX || 0,
+                        l = i.y || i.clientY || 0;
+                    s.initMouseEvent(t, i.bubbles || !1, i.cancelable || !0, window, i.clickCount || 1, 0, 0, a, l, !1, !1, !1, !1, 0, null);
+                    break;
+                case "KeyboardEvents":
+                    var d = s.initKeyboardEvent || s.initKeyEvent;
+                    S.defaults(i, {
+                        cancelable: !0,
+                        ctrlKey: !1,
+                        altKey: !1,
+                        shiftKey: !1,
+                        metaKey: !1,
+                        keyCode: void 0,
+                        charCode: void 0
+                    }), d(t, i.bubbles || !1, i.cancelable, window, i.ctrlKey, i.altKey, i.shiftKey, i.metaKey, i.keyCode, i.charCode);
+                    break;
+                default:
+                    s.initEvent(t, i.bubbles || !1, i.cancelable || !0)
+                }
+                S.defaults(s, o), e.dispatchEvent(s)
+            },
+            bind: function (e, t, n, o) {
+                var i = o || !1;
+                return e.addEventListener ? e.addEventListener(t, n, i) : e.attachEvent && e.attachEvent("on" + t, n), X
+            },
+            unbind: function (e, t, n, o) {
+                var i = o || !1;
+                return e.removeEventListener ? e.removeEventListener(t, n, i) : e.detachEvent && e.detachEvent("on" + t, n), X
+            },
+            addClass: function (e, t) {
+                if (void 0 === e.className) e.className = t;
+                else if (e.className !== t) {
+                    var n = e.className.split(/ +/); - 1 === n.indexOf(t) && (n.push(t), e.className = n.join(" ").replace(/^\s+/, "").replace(/\s+$/, ""))
+                }
+                return X
+            },
+            removeClass: function (e, t) {
+                if (t)
+                    if (e.className === t) e.removeAttribute("class");
+                    else {
+                        var n = e.className.split(/ +/),
+                            o = n.indexOf(t); - 1 !== o && (n.splice(o, 1), e.className = n.join(" "))
+                    }
+                else e.className = void 0;
+                return X
+            },
+            hasClass: function (e, t) {
+                return new RegExp("(?:^|\\s+)" + t + "(?:\\s+|$)").test(e.className) || !1
+            },
+            getWidth: function (e) {
+                var t = getComputedStyle(e);
+                return i(t["border-left-width"]) + i(t["border-right-width"]) + i(t["padding-left"]) + i(t["padding-right"]) + i(t.width)
+            },
+            getHeight: function (e) {
+                var t = getComputedStyle(e);
+                return i(t["border-top-width"]) + i(t["border-bottom-width"]) + i(t["padding-top"]) + i(t["padding-bottom"]) + i(t.height)
+            },
+            getOffset: function (e) {
+                var t = e,
+                    n = {
+                        left: 0,
+                        top: 0
+                    };
+                if (t.offsetParent)
+                    do {
+                        n.left += t.offsetLeft, n.top += t.offsetTop, t = t.offsetParent
+                    } while (t);
+                return n
+            },
+            isActive: function (e) {
+                return e === document.activeElement && (e.type || e.href)
+            }
+        },
+        K = function (e) {
+            function t(e, n) {
+                F(this, t);
+                var o = V(this, (t.__proto__ || Object.getPrototypeOf(t)).call(this, e, n)),
+                    i = o;
+                return o.__prev = o.getValue(), o.__checkbox = document.createElement("input"), o.__checkbox.setAttribute("type", "checkbox"), X.bind(o.__checkbox, "change", function () {
+                    i.setValue(!i.__prev)
+                }, !1), o.domElement.appendChild(o.__checkbox), o.updateDisplay(), o
+            }
+            return j(t, z), P(t, [{
+                key: "setValue",
+                value: function (e) {
+                    var n = D(t.prototype.__proto__ || Object.getPrototypeOf(t.prototype), "setValue", this).call(this, e);
+                    return this.__onFinishChange && this.__onFinishChange.call(this, this.getValue()), this.__prev = this.getValue(), n
+                }
+            }, {
+                key: "updateDisplay",
+                value: function () {
+                    return !0 === this.getValue() ? (this.__checkbox.setAttribute("checked", "checked"), this.__checkbox.checked = !0, this.__prev = !0) : (this.__checkbox.checked = !1, this.__prev = !1), D(t.prototype.__proto__ || Object.getPrototypeOf(t.prototype), "updateDisplay", this).call(this)
+                }
+            }]), t
+        }(),
+        Y = function (e) {
+            function t(e, n, o) {
+                F(this, t);
+                var i = V(this, (t.__proto__ || Object.getPrototypeOf(t)).call(this, e, n)),
+                    r = o,
+                    s = i;
+                if (i.__select = document.createElement("select"), S.isArray(r)) {
+                    var a = {};
+                    S.each(r, function (e) {
+                        a[e] = e
+                    }), r = a
+                }
+                return S.each(r, function (e, t) {
+                    var n = document.createElement("option");
+                    n.innerHTML = t, n.setAttribute("value", e), s.__select.appendChild(n)
+                }), i.updateDisplay(), X.bind(i.__select, "change", function () {
+                    var e = this.options[this.selectedIndex].value;
+                    s.setValue(e)
+                }), i.domElement.appendChild(i.__select), i
+            }
+            return j(t, z), P(t, [{
+                key: "setValue",
+                value: function (e) {
+                    var n = D(t.prototype.__proto__ || Object.getPrototypeOf(t.prototype), "setValue", this).call(this, e);
+                    return this.__onFinishChange && this.__onFinishChange.call(this, this.getValue()), n
+                }
+            }, {
+                key: "updateDisplay",
+                value: function () {
+                    return X.isActive(this.__select) ? this : (this.__select.value = this.getValue(), D(t.prototype.__proto__ || Object.getPrototypeOf(t.prototype), "updateDisplay", this).call(this))
+                }
+            }]), t
+        }(),
+        J = function (e) {
+            function t(e, n) {
+                function o() {
+                    r.setValue(r.__input.value)
+                }
+                F(this, t);
+                var i = V(this, (t.__proto__ || Object.getPrototypeOf(t)).call(this, e, n)),
+                    r = i;
+                return i.__input = document.createElement("input"), i.__input.setAttribute("type", "text"), X.bind(i.__input, "keyup", o), X.bind(i.__input, "change", o), X.bind(i.__input, "blur", function () {
+                    r.__onFinishChange && r.__onFinishChange.call(r, r.getValue())
+                }), X.bind(i.__input, "keydown", function (e) {
+                    13 === e.keyCode && this.blur()
+                }), i.updateDisplay(), i.domElement.appendChild(i.__input), i
+            }
+            return j(t, z), P(t, [{
+                key: "updateDisplay",
+                value: function () {
+                    return X.isActive(this.__input) || (this.__input.value = this.getValue()), D(t.prototype.__proto__ || Object.getPrototypeOf(t.prototype), "updateDisplay", this).call(this)
+                }
+            }]), t
+        }(),
+        W = function (e) {
+            function t(e, n, o) {
+                F(this, t);
+                var i = V(this, (t.__proto__ || Object.getPrototypeOf(t)).call(this, e, n)),
+                    s = o || {};
+                return i.__min = s.min, i.__max = s.max, i.__step = s.step, S.isUndefined(i.__step) ? 0 === i.initialValue ? i.__impliedStep = 1 : i.__impliedStep = Math.pow(10, Math.floor(Math.log(Math.abs(i.initialValue)) / Math.LN10)) / 10 : i.__impliedStep = i.__step, i.__precision = r(i.__impliedStep), i
+            }
+            return j(t, z), P(t, [{
+                key: "setValue",
+                value: function (e) {
+                    var n = e;
+                    return void 0 !== this.__min && n < this.__min ? n = this.__min : void 0 !== this.__max && n > this.__max && (n = this.__max), void 0 !== this.__step && n % this.__step != 0 && (n = Math.round(n / this.__step) * this.__step), D(t.prototype.__proto__ || Object.getPrototypeOf(t.prototype), "setValue", this).call(this, n)
+                }
+            }, {
+                key: "min",
+                value: function (e) {
+                    return this.__min = e, this
+                }
+            }, {
+                key: "max",
+                value: function (e) {
+                    return this.__max = e, this
+                }
+            }, {
+                key: "step",
+                value: function (e) {
+                    return this.__step = e, this.__impliedStep = e, this.__precision = r(e), this
+                }
+            }]), t
+        }(),
+        Q = function (e) {
+            function t(e, n, o) {
+                function i() {
+                    l.__onFinishChange && l.__onFinishChange.call(l, l.getValue())
+                }
+
+                function r(e) {
+                    var t = d - e.clientY;
+                    l.setValue(l.getValue() + t * l.__impliedStep), d = e.clientY
+                }
+
+                function s() {
+                    X.unbind(window, "mousemove", r), X.unbind(window, "mouseup", s), i()
+                }
+                F(this, t);
+                var a = V(this, (t.__proto__ || Object.getPrototypeOf(t)).call(this, e, n, o));
+                a.__truncationSuspended = !1;
+                var l = a,
+                    d = void 0;
+                return a.__input = document.createElement("input"), a.__input.setAttribute("type", "text"), X.bind(a.__input, "change", function () {
+                    var e = parseFloat(l.__input.value);
+                    S.isNaN(e) || l.setValue(e)
+                }), X.bind(a.__input, "blur", function () {
+                    i()
+                }), X.bind(a.__input, "mousedown", function (e) {
+                    X.bind(window, "mousemove", r), X.bind(window, "mouseup", s), d = e.clientY
+                }), X.bind(a.__input, "keydown", function (e) {
+                    13 === e.keyCode && (l.__truncationSuspended = !0, this.blur(), l.__truncationSuspended = !1, i())
+                }), a.updateDisplay(), a.domElement.appendChild(a.__input), a
+            }
+            return j(t, W), P(t, [{
+                key: "updateDisplay",
+                value: function () {
+                    return this.__input.value = this.__truncationSuspended ? this.getValue() : s(this.getValue(), this.__precision), D(t.prototype.__proto__ || Object.getPrototypeOf(t.prototype), "updateDisplay", this).call(this)
+                }
+            }]), t
+        }(),
+        q = function (e) {
+            function t(e, n, o, i, r) {
+                function s(e) {
+                    e.preventDefault();
+                    var t = _.__background.getBoundingClientRect();
+                    return _.setValue(a(e.clientX, t.left, t.right, _.__min, _.__max)), !1
+                }
+
+                function l() {
+                    X.unbind(window, "mousemove", s), X.unbind(window, "mouseup", l), _.__onFinishChange && _.__onFinishChange.call(_, _.getValue())
+                }
+
+                function d(e) {
+                    var t = e.touches[0].clientX,
+                        n = _.__background.getBoundingClientRect();
+                    _.setValue(a(t, n.left, n.right, _.__min, _.__max))
+                }
+
+                function c() {
+                    X.unbind(window, "touchmove", d), X.unbind(window, "touchend", c), _.__onFinishChange && _.__onFinishChange.call(_, _.getValue())
+                }
+                F(this, t);
+                var u = V(this, (t.__proto__ || Object.getPrototypeOf(t)).call(this, e, n, {
+                        min: o,
+                        max: i,
+                        step: r
+                    })),
+                    _ = u;
+                return u.__background = document.createElement("div"), u.__foreground = document.createElement("div"), X.bind(u.__background, "mousedown", function (e) {
+                    document.activeElement.blur(), X.bind(window, "mousemove", s), X.bind(window, "mouseup", l), s(e)
+                }), X.bind(u.__background, "touchstart", function (e) {
+                    1 === e.touches.length && (X.bind(window, "touchmove", d), X.bind(window, "touchend", c), d(e))
+                }), X.addClass(u.__background, "slider"), X.addClass(u.__foreground, "slider-fg"), u.updateDisplay(), u.__background.appendChild(u.__foreground), u.domElement.appendChild(u.__background), u
+            }
+            return j(t, W), P(t, [{
+                key: "updateDisplay",
+                value: function () {
+                    var e = (this.getValue() - this.__min) / (this.__max - this.__min);
+                    return this.__foreground.style.width = 100 * e + "%", D(t.prototype.__proto__ || Object.getPrototypeOf(t.prototype), "updateDisplay", this).call(this)
+                }
+            }]), t
+        }(),
+        Z = function (e) {
+            function t(e, n, o) {
+                F(this, t);
+                var i = V(this, (t.__proto__ || Object.getPrototypeOf(t)).call(this, e, n)),
+                    r = i;
+                return i.__button = document.createElement("div"), i.__button.innerHTML = void 0 === o ? "Fire" : o, X.bind(i.__button, "click", function (e) {
+                    return e.preventDefault(), r.fire(), !1
+                }), X.addClass(i.__button, "button"), i.domElement.appendChild(i.__button), i
+            }
+            return j(t, z), P(t, [{
+                key: "fire",
+                value: function () {
+                    this.__onChange && this.__onChange.call(this), this.getValue().call(this.object), this.__onFinishChange && this.__onFinishChange.call(this, this.getValue())
+                }
+            }]), t
+        }(),
+        $ = function (e) {
+            function t(e, n) {
+                function o(e) {
+                    u(e), X.bind(window, "mousemove", u), X.bind(window, "touchmove", u), X.bind(window, "mouseup", r), X.bind(window, "touchend", r)
+                }
+
+                function i(e) {
+                    _(e), X.bind(window, "mousemove", _), X.bind(window, "touchmove", _), X.bind(window, "mouseup", s), X.bind(window, "touchend", s)
+                }
+
+                function r() {
+                    X.unbind(window, "mousemove", u), X.unbind(window, "touchmove", u), X.unbind(window, "mouseup", r), X.unbind(window, "touchend", r), c()
+                }
+
+                function s() {
+                    X.unbind(window, "mousemove", _), X.unbind(window, "touchmove", _), X.unbind(window, "mouseup", s), X.unbind(window, "touchend", s), c()
+                }
+
+                function a() {
+                    var e = R(this.value);
+                    !1 !== e ? (p.__color.__state = e, p.setValue(p.__color.toOriginal())) : this.value = p.__color.toString()
+                }
+
+                function c() {
+                    p.__onFinishChange && p.__onFinishChange.call(p, p.__color.toOriginal())
+                }
+
+                function u(e) {
+                    -1 === e.type.indexOf("touch") && e.preventDefault();
+                    var t = p.__saturation_field.getBoundingClientRect(),
+                        n = e.touches && e.touches[0] || e,
+                        o = n.clientX,
+                        i = n.clientY,
+                        r = (o - t.left) / (t.right - t.left),
+                        s = 1 - (i - t.top) / (t.bottom - t.top);
+                    return s > 1 ? s = 1 : s < 0 && (s = 0), r > 1 ? r = 1 : r < 0 && (r = 0), p.__color.v = s, p.__color.s = r, p.setValue(p.__color.toOriginal()), !1
+                }
+
+                function _(e) {
+                    -1 === e.type.indexOf("touch") && e.preventDefault();
+                    var t = p.__hue_field.getBoundingClientRect(),
+                        n = 1 - ((e.touches && e.touches[0] || e).clientY - t.top) / (t.bottom - t.top);
+                    return n > 1 ? n = 1 : n < 0 && (n = 0), p.__color.h = 360 * n, p.setValue(p.__color.toOriginal()), !1
+                }
+                F(this, t);
+                var h = V(this, (t.__proto__ || Object.getPrototypeOf(t)).call(this, e, n));
+                h.__color = new I(h.getValue()), h.__temp = new I(0);
+                var p = h;
+                h.domElement = document.createElement("div"), X.makeSelectable(h.domElement, !1), h.__selector = document.createElement("div"), h.__selector.className = "selector", h.__saturation_field = document.createElement("div"), h.__saturation_field.className = "saturation-field", h.__field_knob = document.createElement("div"), h.__field_knob.className = "field-knob", h.__field_knob_border = "2px solid ", h.__hue_knob = document.createElement("div"), h.__hue_knob.className = "hue-knob", h.__hue_field = document.createElement("div"), h.__hue_field.className = "hue-field", h.__input = document.createElement("input"), h.__input.type = "text", h.__input_textShadow = "0 1px 1px ", X.bind(h.__input, "keydown", function (e) {
+                    13 === e.keyCode && a.call(this)
+                }), X.bind(h.__input, "blur", a), X.bind(h.__selector, "mousedown", function () {
+                    X.addClass(this, "drag").bind(window, "mouseup", function () {
+                        X.removeClass(p.__selector, "drag")
+                    })
+                }), X.bind(h.__selector, "touchstart", function () {
+                    X.addClass(this, "drag").bind(window, "touchend", function () {
+                        X.removeClass(p.__selector, "drag")
+                    })
+                });
+                var f = document.createElement("div");
+                return S.extend(h.__selector.style, {
+                    width: "122px",
+                    height: "102px",
+                    padding: "3px",
+                    backgroundColor: "#222",
+                    boxShadow: "0px 1px 3px rgba(0,0,0,0.3)"
+                }), S.extend(h.__field_knob.style, {
+                    position: "absolute",
+                    width: "12px",
+                    height: "12px",
+                    border: h.__field_knob_border + (h.__color.v < .5 ? "#fff" : "#000"),
+                    boxShadow: "0px 1px 3px rgba(0,0,0,0.5)",
+                    borderRadius: "12px",
+                    zIndex: 1
+                }), S.extend(h.__hue_knob.style, {
+                    position: "absolute",
+                    width: "15px",
+                    height: "2px",
+                    borderRight: "4px solid #fff",
+                    zIndex: 1
+                }), S.extend(h.__saturation_field.style, {
+                    width: "100px",
+                    height: "100px",
+                    border: "1px solid #555",
+                    marginRight: "3px",
+                    display: "inline-block",
+                    cursor: "pointer"
+                }), S.extend(f.style, {
+                    width: "100%",
+                    height: "100%",
+                    background: "none"
+                }), l(f, "top", "rgba(0,0,0,0)", "#000"), S.extend(h.__hue_field.style, {
+                    width: "15px",
+                    height: "100px",
+                    border: "1px solid #555",
+                    cursor: "ns-resize",
+                    position: "absolute",
+                    top: "3px",
+                    right: "3px"
+                }), d(h.__hue_field), S.extend(h.__input.style, {
+                    outline: "none",
+                    textAlign: "center",
+                    color: "#fff",
+                    border: 0,
+                    fontWeight: "bold",
+                    textShadow: h.__input_textShadow + "rgba(0,0,0,0.7)"
+                }), X.bind(h.__saturation_field, "mousedown", o), X.bind(h.__saturation_field, "touchstart", o), X.bind(h.__field_knob, "mousedown", o), X.bind(h.__field_knob, "touchstart", o), X.bind(h.__hue_field, "mousedown", i), X.bind(h.__hue_field, "touchstart", i), h.__saturation_field.appendChild(f), h.__selector.appendChild(h.__field_knob), h.__selector.appendChild(h.__saturation_field), h.__selector.appendChild(h.__hue_field), h.__hue_field.appendChild(h.__hue_knob), h.domElement.appendChild(h.__input), h.domElement.appendChild(h.__selector), h.updateDisplay(), h
+            }
+            return j(t, z), P(t, [{
+                key: "updateDisplay",
+                value: function () {
+                    var e = R(this.getValue());
+                    if (!1 !== e) {
+                        var t = !1;
+                        S.each(I.COMPONENTS, function (n) {
+                            if (!S.isUndefined(e[n]) && !S.isUndefined(this.__color.__state[n]) && e[n] !== this.__color.__state[n]) return t = !0, {}
+                        }, this), t && S.extend(this.__color.__state, e)
+                    }
+                    S.extend(this.__temp.__state, this.__color.__state), this.__temp.a = 1;
+                    var n = this.__color.v < .5 || this.__color.s > .5 ? 255 : 0,
+                        o = 255 - n;
+                    S.extend(this.__field_knob.style, {
+                        marginLeft: 100 * this.__color.s - 7 + "px",
+                        marginTop: 100 * (1 - this.__color.v) - 7 + "px",
+                        backgroundColor: this.__temp.toHexString(),
+                        border: this.__field_knob_border + "rgb(" + n + "," + n + "," + n + ")"
+                    }), this.__hue_knob.style.marginTop = 100 * (1 - this.__color.h / 360) + "px", this.__temp.s = 1, this.__temp.v = 1, l(this.__saturation_field, "left", "#fff", this.__temp.toHexString()), this.__input.value = this.__color.toString(), S.extend(this.__input.style, {
+                        backgroundColor: this.__color.toHexString(),
+                        color: "rgb(" + n + "," + n + "," + n + ")",
+                        textShadow: this.__input_textShadow + "rgba(" + o + "," + o + "," + o + ",.7)"
+                    })
+                }
+            }]), t
+        }(),
+        ee = ["-moz-", "-o-", "-webkit-", "-ms-", ""],
+        te = {
+            load: function (e, t) {
+                var n = t || document,
+                    o = n.createElement("link");
+                o.type = "text/css", o.rel = "stylesheet", o.href = e, n.getElementsByTagName("head")[0].appendChild(o)
+            },
+            inject: function (e, t) {
+                var n = t || document,
+                    o = document.createElement("style");
+                o.type = "text/css", o.innerHTML = e;
+                var i = n.getElementsByTagName("head")[0];
+                try {
+                    i.appendChild(o)
+                } catch (e) {}
+            }
+        },
+        ne = function (e, t) {
+            var n = e[t];
+            return S.isArray(arguments[2]) || S.isObject(arguments[2]) ? new Y(e, t, arguments[2]) : S.isNumber(n) ? S.isNumber(arguments[2]) && S.isNumber(arguments[3]) ? S.isNumber(arguments[4]) ? new q(e, t, arguments[2], arguments[3], arguments[4]) : new q(e, t, arguments[2], arguments[3]) : S.isNumber(arguments[4]) ? new Q(e, t, {
+                min: arguments[2],
+                max: arguments[3],
+                step: arguments[4]
+            }) : new Q(e, t, {
+                min: arguments[2],
+                max: arguments[3]
+            }) : S.isString(n) ? new J(e, t) : S.isFunction(n) ? new Z(e, t, "") : S.isBoolean(n) ? new K(e, t) : null
+        },
+        oe = window.requestAnimationFrame || window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame || window.oRequestAnimationFrame || window.msRequestAnimationFrame || function (e) {
+            setTimeout(e, 1e3 / 60)
+        },
+        ie = function () {
+            function e() {
+                F(this, e), this.backgroundElement = document.createElement("div"), S.extend(this.backgroundElement.style, {
+                    backgroundColor: "rgba(0,0,0,0.8)",
+                    top: 0,
+                    left: 0,
+                    display: "none",
+                    zIndex: "1000",
+                    opacity: 0,
+                    WebkitTransition: "opacity 0.2s linear",
+                    transition: "opacity 0.2s linear"
+                }), X.makeFullscreen(this.backgroundElement), this.backgroundElement.style.position = "fixed", this.domElement = document.createElement("div"), S.extend(this.domElement.style, {
+                    position: "fixed",
+                    display: "none",
+                    zIndex: "1001",
+                    opacity: 0,
+                    WebkitTransition: "-webkit-transform 0.2s ease-out, opacity 0.2s linear",
+                    transition: "transform 0.2s ease-out, opacity 0.2s linear"
+                }), document.body.appendChild(this.backgroundElement), document.body.appendChild(this.domElement);
+                var t = this;
+                X.bind(this.backgroundElement, "click", function () {
+                    t.hide()
+                })
+            }
+            return P(e, [{
+                key: "show",
+                value: function () {
+                    var e = this;
+                    this.backgroundElement.style.display = "block", this.domElement.style.display = "block", this.domElement.style.opacity = 0, this.domElement.style.webkitTransform = "scale(1.1)", this.layout(), S.defer(function () {
+                        e.backgroundElement.style.opacity = 1, e.domElement.style.opacity = 1, e.domElement.style.webkitTransform = "scale(1)"
+                    })
+                }
+            }, {
+                key: "hide",
+                value: function () {
+                    var e = this,
+                        t = function t() {
+                            e.domElement.style.display = "none", e.backgroundElement.style.display = "none", X.unbind(e.domElement, "webkitTransitionEnd", t), X.unbind(e.domElement, "transitionend", t), X.unbind(e.domElement, "oTransitionEnd", t)
+                        };
+                    X.bind(this.domElement, "webkitTransitionEnd", t), X.bind(this.domElement, "transitionend", t), X.bind(this.domElement, "oTransitionEnd", t), this.backgroundElement.style.opacity = 0, this.domElement.style.opacity = 0, this.domElement.style.webkitTransform = "scale(1.1)"
+                }
+            }, {
+                key: "layout",
+                value: function () {
+                    this.domElement.style.left = window.innerWidth / 2 - X.getWidth(this.domElement) / 2 + "px", this.domElement.style.top = window.innerHeight / 2 - X.getHeight(this.domElement) / 2 + "px"
+                }
+            }]), e
+        }(),
+        re = function (e) {
+            if (e && "undefined" != typeof window) {
+                var t = document.createElement("style");
+                return t.setAttribute("type", "text/css"), t.innerHTML = e, document.head.appendChild(t), e
+            }
+        }(".dg ul{list-style:none;margin:0;padding:0;width:100%;clear:both}.dg.ac{position:fixed;top:0;left:0;right:0;height:0;z-index:0}.dg:not(.ac) .main{overflow:hidden}.dg.main{-webkit-transition:opacity .1s linear;-o-transition:opacity .1s linear;-moz-transition:opacity .1s linear;transition:opacity .1s linear}.dg.main.taller-than-window{overflow-y:auto}.dg.main.taller-than-window .close-button{opacity:1;margin-top:-1px;border-top:1px solid #2c2c2c}.dg.main ul.closed .close-button{opacity:1 !important}.dg.main:hover .close-button,.dg.main .close-button.drag{opacity:1}.dg.main .close-button{-webkit-transition:opacity .1s linear;-o-transition:opacity .1s linear;-moz-transition:opacity .1s linear;transition:opacity .1s linear;border:0;line-height:19px;height:20px;cursor:pointer;text-align:center;background-color:#000}.dg.main .close-button.close-top{position:relative}.dg.main .close-button.close-bottom{position:absolute}.dg.main .close-button:hover{background-color:#111}.dg.a{float:right;margin-right:15px;overflow-y:visible}.dg.a.has-save>ul.close-top{margin-top:0}.dg.a.has-save>ul.close-bottom{margin-top:27px}.dg.a.has-save>ul.closed{margin-top:0}.dg.a .save-row{top:0;z-index:1002}.dg.a .save-row.close-top{position:relative}.dg.a .save-row.close-bottom{position:fixed}.dg li{-webkit-transition:height .1s ease-out;-o-transition:height .1s ease-out;-moz-transition:height .1s ease-out;transition:height .1s ease-out;-webkit-transition:overflow .1s linear;-o-transition:overflow .1s linear;-moz-transition:overflow .1s linear;transition:overflow .1s linear}.dg li:not(.folder){cursor:auto;height:27px;line-height:27px;padding:0 4px 0 5px}.dg li.folder{padding:0;border-left:4px solid rgba(0,0,0,0)}.dg li.title{cursor:pointer;margin-left:-4px}.dg .closed li:not(.title),.dg .closed ul li,.dg .closed ul li>*{height:0;overflow:hidden;border:0}.dg .cr{clear:both;padding-left:3px;height:27px;overflow:hidden}.dg .property-name{cursor:default;float:left;clear:left;width:40%;overflow:hidden;text-overflow:ellipsis}.dg .cr.function .property-name{width:100%}.dg .c{float:left;width:60%;position:relative}.dg .c input[type=text]{border:0;margin-top:4px;padding:3px;width:100%;float:right}.dg .has-slider input[type=text]{width:30%;margin-left:0}.dg .slider{float:left;width:66%;margin-left:-5px;margin-right:0;height:19px;margin-top:4px}.dg .slider-fg{height:100%}.dg .c input[type=checkbox]{margin-top:7px}.dg .c select{margin-top:5px}.dg .cr.function,.dg .cr.function .property-name,.dg .cr.function *,.dg .cr.boolean,.dg .cr.boolean *{cursor:pointer}.dg .cr.color{overflow:visible}.dg .selector{display:none;position:absolute;margin-left:-9px;margin-top:23px;z-index:10}.dg .c:hover .selector,.dg .selector.drag{display:block}.dg li.save-row{padding:0}.dg li.save-row .button{display:inline-block;padding:0px 6px}.dg.dialogue{background-color:#222;width:460px;padding:15px;font-size:13px;line-height:15px}#dg-new-constructor{padding:10px;color:#222;font-family:Monaco, monospace;font-size:10px;border:0;resize:none;box-shadow:inset 1px 1px 1px #888;word-wrap:break-word;margin:12px 0;display:block;width:440px;overflow-y:scroll;height:100px;position:relative}#dg-local-explain{display:none;font-size:11px;line-height:17px;border-radius:3px;background-color:#333;padding:8px;margin-top:10px}#dg-local-explain code{font-size:10px}#dat-gui-save-locally{display:none}.dg{color:#eee;font:11px 'Lucida Grande', sans-serif;text-shadow:0 -1px 0 #111}.dg.main::-webkit-scrollbar{width:5px;background:#1a1a1a}.dg.main::-webkit-scrollbar-corner{height:0;display:none}.dg.main::-webkit-scrollbar-thumb{border-radius:5px;background:#676767}.dg li:not(.folder){background:#1a1a1a;border-bottom:1px solid #2c2c2c}.dg li.save-row{line-height:25px;background:#dad5cb;border:0}.dg li.save-row select{margin-left:5px;width:108px}.dg li.save-row .button{margin-left:5px;margin-top:1px;border-radius:2px;font-size:9px;line-height:7px;padding:4px 4px 5px 4px;background:#c5bdad;color:#fff;text-shadow:0 1px 0 #b0a58f;box-shadow:0 -1px 0 #b0a58f;cursor:pointer}.dg li.save-row .button.gears{background:#c5bdad url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAANCAYAAAB/9ZQ7AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAQJJREFUeNpiYKAU/P//PwGIC/ApCABiBSAW+I8AClAcgKxQ4T9hoMAEUrxx2QSGN6+egDX+/vWT4e7N82AMYoPAx/evwWoYoSYbACX2s7KxCxzcsezDh3evFoDEBYTEEqycggWAzA9AuUSQQgeYPa9fPv6/YWm/Acx5IPb7ty/fw+QZblw67vDs8R0YHyQhgObx+yAJkBqmG5dPPDh1aPOGR/eugW0G4vlIoTIfyFcA+QekhhHJhPdQxbiAIguMBTQZrPD7108M6roWYDFQiIAAv6Aow/1bFwXgis+f2LUAynwoIaNcz8XNx3Dl7MEJUDGQpx9gtQ8YCueB+D26OECAAQDadt7e46D42QAAAABJRU5ErkJggg==) 2px 1px no-repeat;height:7px;width:8px}.dg li.save-row .button:hover{background-color:#bab19e;box-shadow:0 -1px 0 #b0a58f}.dg li.folder{border-bottom:0}.dg li.title{padding-left:16px;background:#000 url(data:image/gif;base64,R0lGODlhBQAFAJEAAP////Pz8////////yH5BAEAAAIALAAAAAAFAAUAAAIIlI+hKgFxoCgAOw==) 6px 10px no-repeat;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.2)}.dg .closed li.title{background-image:url(data:image/gif;base64,R0lGODlhBQAFAJEAAP////Pz8////////yH5BAEAAAIALAAAAAAFAAUAAAIIlGIWqMCbWAEAOw==)}.dg .cr.boolean{border-left:3px solid #806787}.dg .cr.color{border-left:3px solid}.dg .cr.function{border-left:3px solid #e61d5f}.dg .cr.number{border-left:3px solid #2FA1D6}.dg .cr.number input[type=text]{color:#2FA1D6}.dg .cr.string{border-left:3px solid #1ed36f}.dg .cr.string input[type=text]{color:#1ed36f}.dg .cr.function:hover,.dg .cr.boolean:hover{background:#111}.dg .c input[type=text]{background:#303030;outline:none}.dg .c input[type=text]:hover{background:#3c3c3c}.dg .c input[type=text]:focus{background:#494949;color:#fff}.dg .c .slider{background:#303030;cursor:ew-resize}.dg .c .slider-fg{background:#2FA1D6;max-width:100%}.dg .c .slider:hover{background:#3c3c3c}.dg .c .slider:hover .slider-fg{background:#44abda}\n");
+    te.inject(re);
+    var se = "Default",
+        ae = function () {
+            try {
+                return !!window.localStorage
+            } catch (e) {
+                return !1
+            }
+        }(),
+        le = void 0,
+        de = !0,
+        ce = void 0,
+        ue = !1,
+        _e = [],
+        he = function e(t) {
+            var n = this,
+                o = t || {};
+            this.domElement = document.createElement("div"), this.__ul = document.createElement("ul"), this.domElement.appendChild(this.__ul), X.addClass(this.domElement, "dg"), this.__folders = {}, this.__controllers = [], this.__rememberedObjects = [], this.__rememberedObjectIndecesToControllers = [], this.__listening = [], o = S.defaults(o, {
+                closeOnTop: !1,
+                autoPlace: !0,
+                width: e.DEFAULT_WIDTH
+            }), o = S.defaults(o, {
+                resizable: o.autoPlace,
+                hideable: o.autoPlace
+            }), S.isUndefined(o.load) ? o.load = {
+                preset: se
+            } : o.preset && (o.load.preset = o.preset), S.isUndefined(o.parent) && o.hideable && _e.push(this), o.resizable = S.isUndefined(o.parent) && o.resizable, o.autoPlace && S.isUndefined(o.scrollable) && (o.scrollable = !0);
+            var i = ae && "true" === localStorage.getItem(m(this, "isLocal")),
+                r = void 0,
+                s = void 0;
+            if (Object.defineProperties(this, {
+                    parent: {
+                        get: function () {
+                            return o.parent
+                        }
+                    },
+                    scrollable: {
+                        get: function () {
+                            return o.scrollable
+                        }
+                    },
+                    autoPlace: {
+                        get: function () {
+                            return o.autoPlace
+                        }
+                    },
+                    closeOnTop: {
+                        get: function () {
+                            return o.closeOnTop
+                        }
+                    },
+                    preset: {
+                        get: function () {
+                            return n.parent ? n.getRoot().preset : o.load.preset
+                        },
+                        set: function (e) {
+                            n.parent ? n.getRoot().preset = e : o.load.preset = e, E(this), n.revert()
+                        }
+                    },
+                    width: {
+                        get: function () {
+                            return o.width
+                        },
+                        set: function (e) {
+                            o.width = e, w(n, e)
+                        }
+                    },
+                    name: {
+                        get: function () {
+                            return o.name
+                        },
+                        set: function (e) {
+                            o.name = e, s && (s.innerHTML = o.name)
+                        }
+                    },
+                    closed: {
+                        get: function () {
+                            return o.closed
+                        },
+                        set: function (t) {
+                            o.closed = t, o.closed ? X.addClass(n.__ul, e.CLASS_CLOSED) : X.removeClass(n.__ul, e.CLASS_CLOSED), this.onResize(), n.__closeButton && (n.__closeButton.innerHTML = t ? e.TEXT_OPEN : e.TEXT_CLOSED)
+                        }
+                    },
+                    load: {
+                        get: function () {
+                            return o.load
+                        }
+                    },
+                    useLocalStorage: {
+                        get: function () {
+                            return i
+                        },
+                        set: function (e) {
+                            ae && (i = e, e ? X.bind(window, "unload", r) : X.unbind(window, "unload", r), localStorage.setItem(m(n, "isLocal"), e))
+                        }
+                    }
+                }), S.isUndefined(o.parent)) {
+                if (this.closed = o.closed || !1, X.addClass(this.domElement, e.CLASS_MAIN), X.makeSelectable(this.domElement, !1), ae && i) {
+                    n.useLocalStorage = !0;
+                    var a = localStorage.getItem(m(this, "gui"));
+                    a && (o.load = JSON.parse(a))
+                }
+                this.__closeButton = document.createElement("div"), this.__closeButton.innerHTML = e.TEXT_CLOSED, X.addClass(this.__closeButton, e.CLASS_CLOSE_BUTTON), o.closeOnTop ? (X.addClass(this.__closeButton, e.CLASS_CLOSE_TOP), this.domElement.insertBefore(this.__closeButton, this.domElement.childNodes[0])) : (X.addClass(this.__closeButton, e.CLASS_CLOSE_BOTTOM), this.domElement.appendChild(this.__closeButton)), X.bind(this.__closeButton, "click", function () {
+                    n.closed = !n.closed
+                })
+            } else {
+                void 0 === o.closed && (o.closed = !0);
+                var l = document.createTextNode(o.name);
+                X.addClass(l, "controller-name"), s = c(n, l);
+                X.addClass(this.__ul, e.CLASS_CLOSED), X.addClass(s, "title"), X.bind(s, "click", function (e) {
+                    return e.preventDefault(), n.closed = !n.closed, !1
+                }), o.closed || (this.closed = !1)
+            }
+            o.autoPlace && (S.isUndefined(o.parent) && (de && (ce = document.createElement("div"), X.addClass(ce, "dg"), X.addClass(ce, e.CLASS_AUTO_PLACE_CONTAINER), document.body.appendChild(ce), de = !1), ce.appendChild(this.domElement), X.addClass(this.domElement, e.CLASS_AUTO_PLACE)), this.parent || w(n, o.width)), this.__resizeHandler = function () {
+                n.onResizeDebounced()
+            }, X.bind(window, "resize", this.__resizeHandler), X.bind(this.__ul, "webkitTransitionEnd", this.__resizeHandler), X.bind(this.__ul, "transitionend", this.__resizeHandler), X.bind(this.__ul, "oTransitionEnd", this.__resizeHandler), this.onResize(), o.resizable && y(this), r = function () {
+                ae && "true" === localStorage.getItem(m(n, "isLocal")) && localStorage.setItem(m(n, "gui"), JSON.stringify(n.getSaveObject()))
+            }, this.saveToLocalStorageIfPossible = r, o.parent || function () {
+                var e = n.getRoot();
+                e.width += 1, S.defer(function () {
+                    e.width -= 1
+                })
+            }()
+        };
+    he.toggleHide = function () {
+        ue = !ue, S.each(_e, function (e) {
+            e.domElement.style.display = ue ? "none" : ""
+        })
+    }, he.CLASS_AUTO_PLACE = "a", he.CLASS_AUTO_PLACE_CONTAINER = "ac", he.CLASS_MAIN = "main", he.CLASS_CONTROLLER_ROW = "cr", he.CLASS_TOO_TALL = "taller-than-window", he.CLASS_CLOSED = "closed", he.CLASS_CLOSE_BUTTON = "close-button", he.CLASS_CLOSE_TOP = "close-top", he.CLASS_CLOSE_BOTTOM = "close-bottom", he.CLASS_DRAG = "drag", he.DEFAULT_WIDTH = 245, he.TEXT_CLOSED = "Close Controls", he.TEXT_OPEN = "Open Controls", he._keydownHandler = function (e) {
+        "text" === document.activeElement.type || 72 !== e.which && 72 !== e.keyCode || he.toggleHide()
+    }, X.bind(window, "keydown", he._keydownHandler, !1), S.extend(he.prototype, {
+        add: function (e, t) {
+            return f(this, e, t, {
+                factoryArgs: Array.prototype.slice.call(arguments, 2)
+            })
+        },
+        addColor: function (e, t) {
+            return f(this, e, t, {
+                color: !0
+            })
+        },
+        remove: function (e) {
+            this.__ul.removeChild(e.__li), this.__controllers.splice(this.__controllers.indexOf(e), 1);
+            var t = this;
+            S.defer(function () {
+                t.onResize()
+            })
+        },
+        destroy: function () {
+            if (this.parent) throw new Error("Only the root GUI should be removed with .destroy(). For subfolders, use gui.removeFolder(folder) instead.");
+            this.autoPlace && ce.removeChild(this.domElement);
+            var e = this;
+            S.each(this.__folders, function (t) {
+                e.removeFolder(t)
+            }), X.unbind(window, "keydown", he._keydownHandler, !1), u(this)
+        },
+        addFolder: function (e) {
+            if (void 0 !== this.__folders[e]) throw new Error('You already have a folder in this GUI by the name "' + e + '"');
+            var t = {
+                name: e,
+                parent: this
+            };
+            t.autoPlace = this.autoPlace, this.load && this.load.folders && this.load.folders[e] && (t.closed = this.load.folders[e].closed, t.load = this.load.folders[e]);
+            var n = new he(t);
+            this.__folders[e] = n;
+            var o = c(this, n.domElement);
+            return X.addClass(o, "folder"), n
+        },
+        removeFolder: function (e) {
+            this.__ul.removeChild(e.domElement.parentElement), delete this.__folders[e.name], this.load && this.load.folders && this.load.folders[e.name] && delete this.load.folders[e.name], u(e);
+            var t = this;
+            S.each(e.__folders, function (t) {
+                e.removeFolder(t)
+            }), S.defer(function () {
+                t.onResize()
+            })
+        },
+        open: function () {
+            this.closed = !1
+        },
+        close: function () {
+            this.closed = !0
+        },
+        hide: function () {
+            this.domElement.style.display = "none"
+        },
+        show: function () {
+            this.domElement.style.display = ""
+        },
+        onResize: function () {
+            var e = this.getRoot();
+            if (e.scrollable) {
+                var t = X.getOffset(e.__ul).top,
+                    n = 0;
+                S.each(e.__ul.childNodes, function (t) {
+                    e.autoPlace && t === e.__save_row || (n += X.getHeight(t))
+                }), window.innerHeight - t - 20 < n ? (X.addClass(e.domElement, he.CLASS_TOO_TALL), e.__ul.style.height = window.innerHeight - t - 20 + "px") : (X.removeClass(e.domElement, he.CLASS_TOO_TALL), e.__ul.style.height = "auto")
+            }
+            e.__resize_handle && S.defer(function () {
+                e.__resize_handle.style.height = e.__ul.offsetHeight + "px"
+            }), e.__closeButton && (e.__closeButton.style.width = e.width + "px")
+        },
+        onResizeDebounced: S.debounce(function () {
+            this.onResize()
+        }, 50),
+        remember: function () {
+            if (S.isUndefined(le) && ((le = new ie).domElement.innerHTML = '<div id="dg-save" class="dg dialogue">\n\n  Here\'s the new load parameter for your <code>GUI</code>\'s constructor:\n\n  <textarea id="dg-new-constructor"></textarea>\n\n  <div id="dg-save-locally">\n\n    <input id="dg-local-storage" type="checkbox"/> Automatically save\n    values to <code>localStorage</code> on exit.\n\n    <div id="dg-local-explain">The values saved to <code>localStorage</code> will\n      override those passed to <code>dat.GUI</code>\'s constructor. This makes it\n      easier to work incrementally, but <code>localStorage</code> is fragile,\n      and your friends may not see the same values you do.\n\n    </div>\n\n  </div>\n\n</div>'), this.parent) throw new Error("You can only call remember on a top level GUI.");
+            var e = this;
+            S.each(Array.prototype.slice.call(arguments), function (t) {
+                0 === e.__rememberedObjects.length && v(e), -1 === e.__rememberedObjects.indexOf(t) && e.__rememberedObjects.push(t)
+            }), this.autoPlace && w(this, this.width)
+        },
+        getRoot: function () {
+            for (var e = this; e.parent;) e = e.parent;
+            return e
+        },
+        getSaveObject: function () {
+            var e = this.load;
+            return e.closed = this.closed, this.__rememberedObjects.length > 0 && (e.preset = this.preset, e.remembered || (e.remembered = {}), e.remembered[this.preset] = x(this)), e.folders = {}, S.each(this.__folders, function (t, n) {
+                e.folders[n] = t.getSaveObject()
+            }), e
+        },
+        save: function () {
+            this.load.remembered || (this.load.remembered = {}), this.load.remembered[this.preset] = x(this), _(this, !1), this.saveToLocalStorageIfPossible()
+        },
+        saveAs: function (e) {
+            this.load.remembered || (this.load.remembered = {}, this.load.remembered[se] = x(this, !0)), this.load.remembered[e] = x(this), this.preset = e, g(this, e, !0), this.saveToLocalStorageIfPossible()
+        },
+        revert: function (e) {
+            S.each(this.__controllers, function (t) {
+                this.getRoot().load.remembered ? p(e || this.getRoot(), t) : t.setValue(t.initialValue), t.__onFinishChange && t.__onFinishChange.call(t, t.getValue())
+            }, this), S.each(this.__folders, function (e) {
+                e.revert(e)
+            }), e || _(this.getRoot(), !1)
+        },
+        listen: function (e) {
+            var t = 0 === this.__listening.length;
+            this.__listening.push(e), t && C(this.__listening)
+        },
+        updateDisplay: function () {
+            S.each(this.__controllers, function (e) {
+                e.updateDisplay()
+            }), S.each(this.__folders, function (e) {
+                e.updateDisplay()
+            })
+        }
+    });
+    var pe = {
+            Color: I,
+            math: N,
+            interpret: R
+        },
+        fe = {
+            Controller: z,
+            BooleanController: K,
+            OptionController: Y,
+            StringController: J,
+            NumberController: W,
+            NumberControllerBox: Q,
+            NumberControllerSlider: q,
+            FunctionController: Z,
+            ColorController: $
+        },
+        me = {
+            dom: X
+        },
+        ge = {
+            GUI: he
+        },
+        be = he,
+        ve = {
+            color: pe,
+            controllers: fe,
+            dom: me,
+            gui: ge,
+            GUI: be
+        };
+    e.color = pe, e.controllers = fe, e.dom = me, e.gui = ge, e.GUI = be, e.default = ve, Object.defineProperty(e, "__esModule", {
+        value: !0
+    })
+});
+    // Returns a human-readable label from a KeyboardEvent.code
+    function codeToLabel(code) {
+      if (!code) return '?';
+      return code.replace(/^(Key|Digit|Numpad)/, '').replace(/^Arrow/, '↑↓←→'[['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].indexOf(code)] || '') || code;
+    }
+
+    // Adds a "click to rebind" row inside a dat.GUI folder.
+    // cfgKey  = CFG property name that holds the key code string
+    // label   = display name prefix shown in the row
+    function addKeybindRow(folder, label, cfgKey) {
+      var proxy = { _bind: label + ':  [' + codeToLabel(CFG[cfgKey]) + ']' };
+      var ctrl = folder.add(proxy, '_bind').name('');
+
+      // Находим input внутри контроллера и делаем его недоступным для ввода
+      var inp = ctrl.domElement.querySelector('input');
+      if (inp) {
+        inp.readOnly = true;
+        inp.style.cssText += ';cursor:pointer;user-select:none;caret-color:transparent;';
+      }
+
+      // Стилизуем всю строку как кнопку
+      var li = ctrl.domElement.closest('li') || ctrl.domElement.parentElement;
+      if (li) {
+        li.style.cursor = 'pointer';
+        li.title = 'Нажми чтобы перепривязать';
+      }
+      var cDiv = ctrl.domElement.querySelector('.c') || ctrl.domElement;
+      cDiv.style.cursor = 'pointer';
+
+      function refreshLabel(waiting) {
+        proxy._bind = waiting
+          ? label + ':  [ нажми клавишу… ]'
+          : label + ':  [' + codeToLabel(CFG[cfgKey]) + ']';
+        ctrl.updateDisplay();
+      }
+
+      // Используем mousedown чтобы перехватить до фокуса input-а
+      var rowEl = ctrl.domElement.closest('li') || ctrl.domElement;
+      rowEl.addEventListener('mousedown', function(ev) {
+        ev.preventDefault();   // запрещаем браузеру фокусировать <input>
+        ev.stopPropagation();
+        if (window.__espBindCapture && window.__espBindCapture.cfgKey === cfgKey) return;
+        refreshLabel(true);
+        window.__espBindCapture = {
+          cfgKey: cfgKey,
+          onBind:   function() { refreshLabel(false); },
+          onCancel: function() { refreshLabel(false); }
+        };
+        // Снимаем фокус на случай если input всё-таки был сфокусирован
+        if (document.activeElement && document.activeElement !== document.body) {
+          document.activeElement.blur();
+        }
+      });
+      return ctrl;
     }
 
     function createMenu() {
-      var m = document.createElement('div');
-      m.id = '__esp_menu';
-      m.setAttribute('style',
-        'position:fixed;top:60px;left:12px;z-index:999999;' +
-        'background:rgba(8,8,12,0.93);' +
-        'border:1px solid rgba(255,50,50,0.4);' +
-        'border-radius:10px;padding:10px 14px 14px;min-width:200px;' +
-        'font-family:Arial,sans-serif;font-size:13px;color:#eee;' +
-        'box-shadow:0 0 20px rgba(255,0,0,0.15),0 4px 20px rgba(0,0,0,0.8);' +
-        'user-select:none;');
+      if (typeof dat === 'undefined' || !dat.GUI) { console.warn('[ESP] dat.GUI not loaded'); return; }
 
-      function rowHTML(id, lbl, key, chk) {
-        return '<label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer">' +
-          '<input type="checkbox" id="' + id + '" ' + (chk ? 'checked' : '') +
-          ' style="accent-color:#ff3333;width:13px;height:13px">' +
-          '<span style="color:#ccc">' + lbl + '</span></label>';
-      }
+      var gui = new dat.GUI({ autoPlace: false, width: 280 });
+      var el = gui.domElement;
+      el.style.cssText = 'position:fixed;top:8px;right:280px;z-index:999999';
+      document.body.appendChild(el);
 
-      m.innerHTML =
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
-          '<span style="font-weight:900;color:#ff3333;font-size:15px;letter-spacing:1px">&#9889; ESP</span>' +
-          '<span id="__esp_status" style="font-size:10px;color:#888">&#x23F3; ожидание</span>' +
-          '<span id="__esp_x" style="cursor:pointer;color:#555;font-size:18px">&times;</span>' +
-        '</div>' +
-        rowHTML('__e_on',   'ESP включён',   'espOn',     true) +
-        rowHTML('__e_box',  'Боксы',          'boxes',     true) +
-        rowHTML('__e_dist', 'Дистанция',      'distance',  true) +
-        rowHTML('__e_snap', 'Снэп-линии',     'snaplines', false) +
-        rowHTML('__e_team', 'Тиммейты',       'teammates', false) +
-        // Divider
-        '<div style="border-top:1px solid rgba(255,255,255,0.07);margin:8px 0 10px"></div>' +
-        // Aimbot toggle button
-        '<button id="__esp_ab_btn" style="' +
-          'width:100%;padding:7px 10px;margin-bottom:8px;' +
-          'border-radius:7px;border:1px solid rgba(255,255,255,0.15);' +
-          'background:rgba(255,255,255,0.06);color:#888;' +
-          'cursor:pointer;font-size:13px;font-weight:bold;font-family:Arial,sans-serif;' +
-          'transition:all 0.18s;">' +
-          '&#127919; Аимбот: ВЫКЛ' +
-        '</button>' +
-        '<div style="font-size:11px;color:#555;text-align:center;margin-bottom:8px">Клавиша <b style="color:#aaa">Z</b> — вкл/выкл аимбот</div>' +
-        // FOV slider
-        '<div style="font-size:11px;color:#666;margin-bottom:3px">FOV: <span id="__esp_fov_val">600</span>px</div>' +
-        '<input id="__esp_fov" type="range" min="100" max="1200" step="50" value="600" ' +
-          'style="width:100%;accent-color:#ffee00;margin-bottom:8px">' +
-        '<div id="__esp_dbg" style="padding-top:6px;' +
-        'border-top:1px solid rgba(255,255,255,0.07);font-size:10px;color:#444"></div>';
-
-      document.body.appendChild(m);
-
-      function bind(id, k) {
-        var el = document.getElementById(id);
-        if (el) el.addEventListener('change', function(e) { CFG[k] = e.target.checked; });
-      }
-      bind('__e_on',   'espOn');
-      bind('__e_box',  'boxes');
-      bind('__e_dist', 'distance');
-      bind('__e_snap', 'snaplines');
-      bind('__e_team', 'teammates');
-
-      // Aimbot button
-      var abBtn = document.getElementById('__esp_ab_btn');
-      if (abBtn) {
-        abBtn.addEventListener('click', function() {
-          CFG.aimbotOn = !CFG.aimbotOn;
-          window.__espAimbot = CFG.aimbotOn;
-          updateAimbotBtn(abBtn);
-        });
-      }
-
-      // FOV slider
-      var fovSlider = document.getElementById('__esp_fov');
-      var fovVal    = document.getElementById('__esp_fov_val');
-      if (fovSlider) {
-        fovSlider.addEventListener('input', function() {
-          CFG.aimbotFOV = parseInt(fovSlider.value);
-          if (fovVal) fovVal.textContent = fovSlider.value;
-        });
-      }
-
-      document.getElementById('__esp_x').addEventListener('click', function() { m.remove(); });
-
-      // Status updater
-      setInterval(function() {
-        var st  = document.getElementById('__esp_status');
-        var dbg = document.getElementById('__esp_dbg');
-        if (!st) return;
-        var cnt  = (window.__espPlayers && window.__espPlayers.size) || 0;
-        var zoom = window.__espZoom || 28;
-        var ppu  = Math.round((window.innerHeight / 2) / zoom);
-        if (cnt > 0 || window.__espActiveId) {
-          st.textContent = '\u2713 активно';
-          st.style.color = '#33ff88';
-        } else {
-          st.textContent = '\u23F3 ожидание';
-          st.style.color = '#888';
+      // H = toggle menu open/close
+      document.addEventListener('keydown', function(e) {
+        if (e.target && e.target.matches('input,textarea')) return;
+        if (e.code === 'KeyH') {
+          if (gui.closed) gui.open(); else gui.close();
         }
-        if (dbg) {
-          dbg.textContent = 'игроков: ' + cnt + '  zoom: ' + zoom + '  ppu: ~' + ppu +
-                            (CFG.aimbotOn ? '  \u26A1aim' : '');
-        }
-        // Sync aimbot button in case Z was pressed
-        var btn = document.getElementById('__esp_ab_btn');
-        if (btn) updateAimbotBtn(btn);
-      }, 800);
+      }, true);
 
-      // Draggable
-      var drag = false, ox = 0, oy = 0;
-      m.addEventListener('mousedown', function(e) {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' ||
-            e.target.id === '__esp_x') return;
-        drag = true;
-        ox = e.clientX - m.offsetLeft;
-        oy = e.clientY - m.offsetTop;
-      });
-      document.addEventListener('mousemove', function(e) {
-        if (!drag) return;
-        m.style.left = (e.clientX - ox) + 'px';
-        m.style.top  = (e.clientY - oy) + 'px';
-      });
-      document.addEventListener('mouseup', function() { drag = false; });
+      // ── ESP ──
+      var espF = gui.addFolder('ESP');
+      espF.add(CFG, 'espOn').name('ESP Enabled');
+      espF.add(CFG, 'lines').name('Lines to enemies');
+      espF.add(CFG, 'teammates').name('Show teammates');
+      espF.open();
+
+      // ── AUTO-LOOT ──
+      var lutF = gui.addFolder('AUTO-LOOT');
+      lutF.add(CFG, 'autoLoot').name('Auto pickup ON/OFF');
+      lutF.open();
+
+      // ── AIMBOT ──
+      var abF = gui.addFolder('AIMBOT');
+      abF.add(CFG, 'aimbotOn').name('Aimbot ON/OFF').onChange(function(v) { window.__espAimbot = v; });
+      abF.add(CFG, 'aimbotFOV', 30, 600, 10).name('FOV Radius');
+      abF.add(CFG, 'mouseFOV').name('Mouse FOV [M]');
+      abF.open();
+
+      // ── PREDICT ──
+      var predF = gui.addFolder('PREDICT');
+      predF.add(CFG, 'predictMs', 0, 300, 10).name('Prediction ms').onChange(function(v) { CFG.predict = v > 0; });
+      predF.open();
+
+      // ── ZOOM ──
+      var zoomProxy = { zoom: Math.round((window.__espZoomMult || 1) * 100) };
+      window.__espZoomProxy = zoomProxy;
+      var zoomF = gui.addFolder('ZOOM [Scroll]');
+      var zoomCtrl = zoomF.add(zoomProxy, 'zoom', 50, 600, 5)
+        .name('Zoom (50=close 100=normal 600=far)')
+        .onChange(function(v) {
+          window.__espZoomMult = v / 100;
+          window.__espGameZoom = (window.__espZoom || 28) * window.__espZoomMult;
+        });
+      window.__espZoomCtrl = zoomCtrl;
+      zoomF.open();
+
+      // ── COLORS ──
+      var colF = gui.addFolder('COLORS');
+      colF.addColor(CFG, 'enemyCol').name('Enemies');
+      colF.addColor(CFG, 'teamCol').name('Teammates');
+      colF.addColor(CFG, 'aimCol').name('Aim target');
+      colF.open();
+
+      // ── KEYBINDS ──
+      var kbF = gui.addFolder('KEYBINDS');
+      addKeybindRow(kbF, 'Aimbot toggle', 'keyAimbot');
+      addKeybindRow(kbF, 'Auto-loot toggle', 'keyLoot');
+      // Статичные подсказки для клавиш без перебиндинга
+      var kbInfo = { _h: 'H  —  открыть / закрыть меню', _m: 'M  —  Mouse-FOV вкл/выкл', _s: 'Scroll  —  зум' };
+      kbF.add(kbInfo, '_h').name('');
+      kbF.add(kbInfo, '_m').name('');
+      kbF.add(kbInfo, '_s').name('');
+      kbF.open();
+
+      // ── CONFIG SAVE ──
+      var CFG_KEY = '__esp_cfg_v1';
+      var cfgAct = {
+        save:  function() {
+          try {
+            localStorage.setItem(CFG_KEY, JSON.stringify(CFG));
+            console.log('[ESP] Конфиг сохранён');
+          } catch(e) { console.warn('[ESP] Ошибка сохранения', e); }
+        },
+        load:  function() {
+          try {
+            var raw = localStorage.getItem(CFG_KEY);
+            if (!raw) { console.warn('[ESP] Нет сохранённого конфига'); return; }
+            var loaded = JSON.parse(raw);
+            Object.assign(CFG, loaded);
+            // Обновляем все контроллеры dat.GUI
+            gui.__controllers.forEach(function(c) { c.updateDisplay(); });
+            Object.keys(gui.__folders).forEach(function(k) {
+              gui.__folders[k].__controllers.forEach(function(c) { c.updateDisplay(); });
+            });
+            console.log('[ESP] Конфиг загружен');
+          } catch(e) { console.warn('[ESP] Ошибка загрузки', e); }
+        },
+        reset: function() {
+          var def = {
+            espOn:true,lines:true,teammates:false,
+            predict:true,predictMs:80,aimbotOn:false,aimbotFOV:300,
+            mouseFOV:true,autoLoot:false,keyAimbot:'KeyZ',keyLoot:'KeyF',
+            enemyCol:'#ff4444',teamCol:'#44ff99',aimCol:'#ffe040'
+          };
+          Object.assign(CFG, def);
+          gui.__controllers.forEach(function(c) { c.updateDisplay(); });
+          Object.keys(gui.__folders).forEach(function(k) {
+            gui.__folders[k].__controllers.forEach(function(c) { c.updateDisplay(); });
+          });
+          console.log('[ESP] Конфиг сброшен к дефолтам');
+        }
+      };
+      var cfgF = gui.addFolder('CONFIG SAVE');
+      cfgF.add(cfgAct, 'save').name('💾  Сохранить конфиг');
+      cfgF.add(cfgAct, 'load').name('📂  Загрузить конфиг');
+      cfgF.add(cfgAct, 'reset').name('♻  Сброс к дефолтам');
+      cfgF.open();
+
+      // Автозагрузка при старте
+      try {
+        var _raw = localStorage.getItem(CFG_KEY);
+        if (_raw) { Object.assign(CFG, JSON.parse(_raw)); console.log('[ESP] Конфиг автозагружен'); }
+      } catch(_) {}
     }
 
-    // ── Boot ──────────────────────────────────────────────────────
     function boot() {
-      initCanvas();
-      createMenu();
-      loop();
-      console.log('%c[ESP+AIM] \u2713 injected | Z = toggle aimbot', 'color:#ff3333;font-weight:bold');
+      initCanvas(); createMenu(); loop();
+      console.log('%c[ESP v4] ON — Z=aimbot M=mousefov Scroll=zoom H=menu','color:#00ffaa;font-weight:bold;font-size:13px');
     }
-
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', boot);
-    } else {
-      boot();
-    }
+    if (document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot);
+    else boot();
   })();
 }
-// ═══════════════════════════════════════════════════════════════
-// ESP + AIMBOT END
-// ═══════════════════════════════════════════════════════════════
