@@ -35223,10 +35223,9 @@
             ⲅո̎.ӗܙ += "<option disabled>All servers - " + ⲟ̷๖ + " players</option></select>";
             document[ᴘᄃ̈]("serverList")[ᴑ༠Ꮷ] = Ꮷࡄ५;
             document[ᴘᄃ̈]("servers")[αᄁߍ] = 0;
-            ᚄ‍.ᴇ̵ᚆ.ρܘ༩ = 1;
             if (ᴎ٧̄.оߋߊ("admin") !== null || ᴎ٧̄.оߋߊ("member") !== null || ᴎ٧̄.оߋߊ("moderator") !== null) {
               if (ᴎ٧̄.оߋߊ("admin") !== null || ᴎ٧̄.оߋߊ("moderator") !== null) {
-                ᅟ
+                ᅟᚄ‍.ᴇ̵ᚆ.ρܘ༩ = 1;
                 document[Іᄇܖ]("chatInput")[ᴎ८༩] = 1000000;
               }
               document[Іᄇܖ]("nickname")[ᴑ༠Ꮷ] += "<input id=\"passwordInput\" type=\"password\" placeholder=\"Password\" maxLength=\"16\">";
