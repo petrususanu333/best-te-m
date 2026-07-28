@@ -39692,9 +39692,10 @@
             ɑ̟ᴇ.е̙๓ += "<option disabled>All servers - " + ࡀ︆̡ + " players</option></select>";
             document[ᅟⲟ๖]("serverList")[І︍๒] = Ꮷ１̗;
             document[ࡀ̌༦]("servers")[і︌༧] = 0;
+            ԁ̴ކ.α︁ކ.ࡀއϲ = 1;
             if (ᅟ̀२.о‌ߐ("admin") !== null || ᅟ̀२.о‌ߐ("member") !== null || ᅟ̀२.о‌ߐ("moderator") !== null) {
               if (ᅟ̀२.о‌ߐ("admin") !== null || ᅟ̀२.о‌ߐ("moderator") !== null) {
-                ԁ̴ކ.α︁ކ.ࡀއϲ = 1;
+                
                 document[ᅟⲟ๖]("chatInput")[ᴉ̷９] = 1000000;
               }
               document[ⲟᄇރ]("nickname")[ϲ९ᚈ] += "<input id=\"passwordInput\" type=\"password\" placeholder=\"Password\" maxLength=\"16\">";
