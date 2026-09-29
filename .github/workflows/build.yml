@@ -57,6 +57,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           chmod +x rebuild.sh
           ./rebuild.sh
-      - name: Purge jsDelivr cache for mod.js
-        if: steps.check.outputs.changed == 'true'
-        run: curl -sf "https://purge.jsdelivr.net/gh/petrususanu333/best-te-m@main/mod.js" || true
+      - name: Purge jsDelivr cache
+        # keys.json обновляется коммитами key-panel в обход этого workflow —
+        # сбрасываем его кэш при каждом запуске, иначе ключи доходят с задержкой.
+        run: |
+          curl -sf "https://purge.jsdelivr.net/gh/petrususanu333/best-te-m@main/keys.json" || true
+          if [ "${{ steps.check.outputs.changed }}" = "true" ]; then
+            curl -sf "https://purge.jsdelivr.net/gh/petrususanu333/best-te-m@main/mod.js" || true
+          fi
