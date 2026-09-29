@@ -12,6 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install curl-impersonate
+        # Cloudflare на devast.io отдаёт 403 голому curl с IP GitHub Actions.
+        run: |
+          mkdir -p /tmp/ci
+          curl -fsSL https://github.com/lexiforest/curl-impersonate/releases/download/v2.2.3/curl-impersonate-v2.2.3.x86_64-linux-gnu.tar.gz | tar -xz -C /tmp/ci
+          echo "/tmp/ci" >> "$GITHUB_PATH"
+          curl_chrome131 --version | head -1
       - name: Check for new client build
         id: check
         run: |
@@ -20,11 +27,11 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           SITE="https://dev""ast.io"
-          curl -fsSL "$SITE/" -o /tmp/site_index.html
+          curl_chrome131 -fsSL "$SITE/" -o /tmp/site_index.html
           JS=$(grep -o 'js/[A-Za-z0-9_-]*\.js' /tmp/site_index.html | head -1)
           if [ -z "$JS" ]; then echo "no client path in index"; echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           echo "client: $JS"
-          curl -fsSL "$SITE/$JS" -o /tmp/site_client.js
+          curl_chrome131 -fsSL "$SITE/$JS" -o /tmp/site_client.js
           SHA=$(sha256sum /tmp/site_client.js | cut -d' ' -f1)
           OLD=$(cat state/client.sha256 2>/dev/null || echo none)
           echo "client sha: $SHA (was: $OLD)"

@@ -38,12 +38,21 @@ fi
 cd "$WORK"
 
 # --- свежий клиент ---
+# Cloudflare на devast.io отдаёт 403 голому curl с IP GitHub Actions —
+# используем curl-impersonate (TLS-отпечаток Chrome), если он есть в PATH.
 SITE="https://dev""ast.io"
-curl -fsSL "$SITE/" -o index.html
+fetch() {
+  if command -v curl_chrome131 >/dev/null 2>&1; then
+    curl_chrome131 -fsSL "$1" -o "$2"
+  else
+    curl -fsSL -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' "$1" -o "$2"
+  fi
+}
+fetch "$SITE/" index.html
 JS=$(grep -o 'js/[A-Za-z0-9_-]*\.js' index.html | head -1)
 [ -n "$JS" ] || { echo "FAIL: client js not found"; exit 1; }
 echo "client: $JS"
-curl -fsSL "$SITE/$JS" -o client.js
+fetch "$SITE/$JS" client.js
 [ -s client.js ] || { echo "FAIL: client empty"; exit 1; }
 
 # --- деобфускация + постпроцесс ---
