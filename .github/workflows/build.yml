@@ -16,7 +16,9 @@ jobs:
         # Cloudflare на devast.io отдаёт 403 голому curl с IP GitHub Actions.
         run: |
           mkdir -p /tmp/ci
-          curl -fsSL https://github.com/lexiforest/curl-impersonate/releases/download/v2.2.3/curl-impersonate-v2.2.3.x86_64-linux-gnu.tar.gz | tar -xz -C /tmp/ci
+          curl -fsSL https://github.com/lexiforest/curl-impersonate/releases/download/v2.2.3/curl-impersonate-v2.2.3.x86_64-linux-gnu.tar.gz -o /tmp/ci.tar.gz
+          echo "ca7c8aae49e33260d3a2400db16c7737aaf04692d606a843502056b42990f989  /tmp/ci.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/ci.tar.gz -C /tmp/ci
           echo "/tmp/ci" >> "$GITHUB_PATH"
           curl_chrome131 --version | head -1
       - name: Check for new client build
