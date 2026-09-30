@@ -12,28 +12,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install curl-impersonate
-        # Cloudflare на devast.io отдаёт 403 голому curl с IP GitHub Actions.
-        run: |
-          mkdir -p /tmp/ci
-          curl -fsSL https://github.com/lexiforest/curl-impersonate/releases/download/v2.2.3/curl-impersonate-v2.2.3.x86_64-linux-gnu.tar.gz -o /tmp/ci.tar.gz
-          echo "ca7c8aae49e33260d3a2400db16c7737aaf04692d606a843502056b42990f989  /tmp/ci.tar.gz" | sha256sum -c -
-          tar -xzf /tmp/ci.tar.gz -C /tmp/ci
-          echo "/tmp/ci" >> "$GITHUB_PATH"
-          curl_chrome131 --version | head -1
       - name: Check for new client build
         id: check
         run: |
           set -e
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+          fetch() {
+            # $1 url, $2 dest — прямой запрос, curl-impersonate (TLS-отпечаток
+            # Chrome: Cloudflare режет обычный curl с IP GitHub Actions), затем прокси
+            if curl -fsSL -A "$UA" "$1" -o "$2" && [ -s "$2" ]; then return 0; fi
+            if [ ! -d /tmp/ci ]; then
+              mkdir -p /tmp/ci
+              curl -fsSL "https://github.com/lwthiker/curl-impersonate/releases/download/v0.6.1/curl-impersonate-v0.6.1.x86_64-linux-gnu.tar.gz" \
+                -o /tmp/ci.tgz \
+              && echo "fa1e1614f7ba69ccc66721a0f38be457a3647eb64c75d66974b56186e3316b12  /tmp/ci.tgz" | sha256sum -c - \
+              && tar -xzf /tmp/ci.tgz -C /tmp/ci || true
+            fi
+            for w in /tmp/ci/curl_chrome* /tmp/ci/curl_ff*; do
+              [ -x "$w" ] || continue
+              if "$w" -fsSL "$1" -o "$2" >/dev/null 2>&1 && [ -s "$2" ]; then return 0; fi
+            done
+            if curl -fsSL -A "$UA" -G "https://api.allorigins.win/raw" --data-urlencode "url=$1" -o "$2" && [ -s "$2" ]; then return 0; fi
+            if curl -fsSL -A "$UA" -G "https://api.codetabs.com/v1/proxy" --data-urlencode "quest=$1" -o "$2" && [ -s "$2" ]; then return 0; fi
+            return 1
+          }
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           SITE="https://dev""ast.io"
-          curl_chrome131 -fsSL "$SITE/" -o /tmp/site_index.html
+          fetch "$SITE/" /tmp/site_index.html
           JS=$(grep -o 'js/[A-Za-z0-9_-]*\.js' /tmp/site_index.html | head -1)
           if [ -z "$JS" ]; then echo "no client path in index"; echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           echo "client: $JS"
-          curl_chrome131 -fsSL "$SITE/$JS" -o /tmp/site_client.js
+          fetch "$SITE/$JS" /tmp/site_client.js
           SHA=$(sha256sum /tmp/site_client.js | cut -d' ' -f1)
           OLD=$(cat state/client.sha256 2>/dev/null || echo none)
           echo "client sha: $SHA (was: $OLD)"
@@ -56,7 +67,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           chmod +x rebuild.sh
-          ./rebuild.sh
+          ./rebuild.sh ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
       - name: Purge jsDelivr cache
         # keys.json обновляется коммитами key-panel в обход этого workflow —
         # сбрасываем его кэш при каждом запуске, иначе ключи доходят с задержкой.

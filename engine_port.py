@@ -6458,11 +6458,16 @@ def port_aimbot(src: str, ent: str | None = None) -> str:
     if mdef:
         params = [x.strip() for x in mdef.group(1).split(',')]
         body = src[mdef.end():mdef.end() + 1500]
-        mang = re.search(r'\*\s*(%s)\s*\*\s*Math(?:\[[^\]]+\]|\.PI)\s*/\s*255' % W, body)
-        if mang and mang.group(1) in params:
-            k = params.index(mang.group(1)) - 1
-            if 0 <= k < len(fields):
-                POS_A = fields[k]
+        mang = re.search(
+            r'((?:%s\s*\*\s*)*%s)\s*\*\s*Math(?:\[[^\]]+\]|\.PI)\s*/\s*(?:\d+|%s)'
+            % (W, W, W), body)
+        if mang:
+            for cand in re.findall(W, mang.group(1)):
+                if cand in params:
+                    k = params.index(cand) - 1
+                    if 0 <= k < len(fields):
+                        POS_A = fields[k]
+                    break
     if POS_A == "undefined":
         print("  WARNING ping aim: angle field not found, ping fallback only")
 
@@ -7007,7 +7012,7 @@ def port_aimbot(src: str, ent: str | None = None) -> str:
         if not re.match(r'^\s*Entitie\.%s\(\);\s*$' % W, s):
             continue
         for j in range(max(0, i - 8), i):
-            if not re.search(r'if\s*\(\s*World(?:\.|\[)\s*%s\s*\]?\s*>' % W, L[j]):
+            if not re.search(r'if\s*\(\s*[^)]*?(?:World(?:\.|\[)\s*%s\s*\]?\s*>|<\s*World(?:\.|\[)\s*%s\s*\]?)' % (W, W), L[j]):
                 continue
             for k in range(j, max(0, j - 400), -1):
                 if re.match(r'^\s*function\s+%s\(\)\s*\{?\s*$' % W, L[k]):
@@ -7460,8 +7465,8 @@ def patch_real_angles(src: str) -> tuple[str, str]:
         # a sibling branch interpolates the real angle: reuse its fields
         lerp = re.search(
             r'%s%s\s*=\s*(?P<call>%s(?:%s)?)\(\s*(?P<cur>%s%s)\s*,\s*'
-            r'(?P<pov>%s%s)\s*,\s*(?P<fac>%s%s)(?:\s*[*/]\s*[^,;)]+)?\s*\)'
-            % (O, ACC, W, ACC, O, ACC, O, ACC, O, ACC),
+            r'(?P<pov>%s%s)\s*,\s*(?P<fac>[^,)]+?)(?:\s*[*/]\s*[^,)]+)?\s*\)'
+            % (O, ACC, W, ACC, O, ACC, O, ACC),
             '\n'.join(L[i_asg:min(i_asg + 14, len(L))]))
         if not lerp:
             continue
