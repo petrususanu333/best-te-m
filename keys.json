@@ -104,12 +104,12 @@
    "label": "devin-test",
    "active": true,
    "ts": 1790876901,
-   "last_seen": 1790877740,
+   "last_seen": 1790878512,
    "devices": {
     "d1gqovidimuptvqkb": {
-     "last_seen": 1790877740,
+     "last_seen": 1790878512,
      "first_seen": 1790876951,
-     "tok": "\"O]66KQy01oE@eiCB@am?\" \"59\" \"3\""
+     "tok": "\"O]66KQy01oE@eiCB@am?\" \"63\" \"3\""
     }
    }
   }
@@ -139,5 +139,5 @@
    "reason": "two devices"
   }
  ],
- "rev": 320
+ "rev": 321
 }
