@@ -73,6 +73,15 @@
      "tok": "\"ADo?[TEA6cHcJZHD1Su[\" \"2698\" \"18\""
     }
    }
+  },
+  {
+   "sha": "fcc7f354495055c7b492a2a01e3fdb933293344e68229355c2b8865b51d0b414",
+   "hint": "TEST\u2026",
+   "label": "key:devintest2",
+   "active": true,
+   "ts": 1790873000,
+   "last_seen": 0,
+   "devices": {}
   }
  ],
  "sessions": {},
@@ -89,5 +98,5 @@
    "reason": "two devices"
   }
  ],
- "rev": 306
+ "rev": 307
 }
