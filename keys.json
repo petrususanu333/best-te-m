@@ -80,11 +80,17 @@
    "label": "key:devintest",
    "active": true,
    "ts": 1790870000,
-   "last_seen": 0,
-   "devices": {}
+   "last_seen": 1790869607,
+   "devices": {
+    "dv5mroj6emuppib5e": {
+     "last_seen": 1790869607,
+     "first_seen": 1790869607,
+     "tok": "\"V41ike:@r7W84]X_6klg\" \"\" \"\""
+    }
+   }
   }
  ],
  "sessions": {},
  "bans": [],
- "rev": 304
+ "rev": 305
 }
