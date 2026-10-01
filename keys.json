@@ -82,6 +82,15 @@
    "ts": 1790875000,
    "last_seen": 0,
    "devices": {}
+  },
+  {
+   "sha": "f527fd7694d6aea71e9c3f18640a739f464fed046749e117c43c0d75dc6bcc5f",
+   "hint": "TEST\u2026",
+   "label": "key:devintest4",
+   "active": true,
+   "ts": 1790880000,
+   "last_seen": 0,
+   "devices": {}
   }
  ],
  "sessions": {},
@@ -109,5 +118,5 @@
    "reason": "two devices"
   }
  ],
- "rev": 313
+ "rev": 314
 }
