@@ -97,6 +97,15 @@
    "ts": 1790880000,
    "last_seen": 0,
    "devices": {}
+  },
+  {
+   "sha": "446889294a8a77a00a98b142c127a620c3cecff0853ec56ef4ad5f926b1dfe11",
+   "hint": "TEST-DEVN-AIM2-0001",
+   "label": "devin-test",
+   "active": true,
+   "ts": 1790876901,
+   "last_seen": 0,
+   "devices": {}
   }
  ],
  "sessions": {},
@@ -124,5 +133,5 @@
    "reason": "two devices"
   }
  ],
- "rev": 316
+ "rev": 317
 }
