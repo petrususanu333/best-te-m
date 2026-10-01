@@ -36,12 +36,12 @@
    "label": "key:J95A-\u2026",
    "active": true,
    "ts": 1790689677,
-   "last_seen": 1790871211,
+   "last_seen": 1790871872,
    "devices": {
     "dgt905tux65muf7e97t": {
-     "last_seen": 1790871211,
+     "last_seen": 1790871872,
      "first_seen": 1790689812,
-     "tok": "\"I4eq2lsjY3YEWTXDXm2=\" \"6707\" \"11\""
+     "tok": "\"I4eq2lsjY3YEWTXDXm2=\" \"3075\" \"4\""
     }
    }
   },
@@ -109,5 +109,5 @@
    "reason": "two devices"
   }
  ],
- "rev": 312
+ "rev": 313
 }
