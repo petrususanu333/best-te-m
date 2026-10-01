@@ -73,24 +73,21 @@
      "tok": "\"ADo?[TEA6cHcJZHD1Su[\" \"2698\" \"18\""
     }
    }
-  },
+  }
+ ],
+ "sessions": {},
+ "bans": [
   {
    "sha": "b4196d38f937004896aeb4e94e98ac0db78dbf010f38a3950e89dd149a4f71ee",
    "hint": "TEST\u2026",
    "label": "key:devintest",
-   "active": true,
-   "ts": 1790870000,
-   "last_seen": 1790869607,
-   "devices": {
-    "dv5mroj6emuppib5e": {
-     "last_seen": 1790869607,
-     "first_seen": 1790869607,
-     "tok": "\"V41ike:@r7W84]X_6klg\" \"\" \"\""
-    }
-   }
+   "devices": [
+    "dv5mroj6emuppib5e",
+    "di5cvgqqimuppkuyg"
+   ],
+   "ts": 1790869738,
+   "reason": "two devices"
   }
  ],
- "sessions": {},
- "bans": [],
- "rev": 305
+ "rev": 306
 }
