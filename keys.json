@@ -73,21 +73,6 @@
      "tok": "\"ADo?[TEA6cHcJZHD1Su[\" \"2698\" \"18\""
     }
    }
-  },
-  {
-   "sha": "fcc7f354495055c7b492a2a01e3fdb933293344e68229355c2b8865b51d0b414",
-   "hint": "TEST\u2026",
-   "label": "key:devintest2",
-   "active": true,
-   "ts": 1790873000,
-   "last_seen": 1790870357,
-   "devices": {
-    "d020dlfzgmuppyf9u": {
-     "last_seen": 1790870357,
-     "first_seen": 1790870357,
-     "tok": "\"lK`k>RT6R8L;_3<uYEhX\" \"\" \"\""
-    }
-   }
   }
  ],
  "sessions": {},
@@ -102,7 +87,18 @@
    ],
    "ts": 1790869738,
    "reason": "two devices"
+  },
+  {
+   "sha": "fcc7f354495055c7b492a2a01e3fdb933293344e68229355c2b8865b51d0b414",
+   "hint": "TEST\u2026",
+   "label": "key:devintest2",
+   "devices": [
+    "d020dlfzgmuppyf9u",
+    "d4itc5rb1mupq4akh"
+   ],
+   "ts": 1790870633,
+   "reason": "two devices"
   }
  ],
- "rev": 308
+ "rev": 309
 }
