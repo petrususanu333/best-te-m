@@ -73,9 +73,18 @@
      "tok": "\"ADo?[TEA6cHcJZHD1Su[\" \"2698\" \"18\""
     }
    }
+  },
+  {
+   "sha": "b4196d38f937004896aeb4e94e98ac0db78dbf010f38a3950e89dd149a4f71ee",
+   "hint": "TEST\u2026",
+   "label": "key:devintest",
+   "active": true,
+   "ts": 1790870000,
+   "last_seen": 0,
+   "devices": {}
   }
  ],
  "sessions": {},
  "bans": [],
- "rev": 303
+ "rev": 304
 }
