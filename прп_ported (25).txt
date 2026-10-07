@@ -31320,7 +31320,7 @@
       if (ᅟ๒ܔ.ոࠄ६ === 2) {
         return;
       }
-      console[ո︎︂]("LOAD", ᅟ๒ܔ);
+      /* LOAD log removed */
       var ⲣ̴і = new XMLHttpRequest();
       ⲣ̴і[ᴀ̎р]("GET", ᅟ๒ܔ[ᴄܙ८], Ꮷ͡༠);
       ⲣ̴і[ᴌܒࠂ] = "arraybuffer";
@@ -87264,7 +87264,7 @@
     function ready() {
       if (!window.dat || !window.dat.GUI || document.querySelector('.dg.main')) return;
       var style = document.createElement('style');
-      style.textContent = '.dg.main{position:fixed!important;top:0!important;right:-15px!important;background:rgba(20,0,0,.95)!important;width:300px!important;padding:10px!important;border-radius:8px!important;color:#ffb3b3!important;font-family:Arial,sans-serif!important;font-size:20px!important;box-shadow:0 0 10px rgba(255,0,0,.7)!important;z-index:2147483647!important;border:1px solid rgba(255,0,0,.9)!important}.dg.main .title{text-align:center;color:#f00!important;border-bottom:1px solid rgba(255,0,0,.8);font-size:16px;font-weight:bold}.dg .folder .title{background:rgba(60,0,0,.7)!important;color:#f99!important;font-size:14px;font-weight:bold;border-radius:4px}.dg .folder .folder .title{background:rgba(100,0,0,.7)!important}.dg .folder .folder .folder .title{background:rgba(140,0,0,.6)!important}.dg .folder .title:hover{background:rgba(255,0,0,.9)!important;color:#fff!important;box-shadow:0 0 6px rgba(255,0,0,.9)}.dg .slider-fg{background:rgba(255,0,0,.9)!important}.dg .c input[type=text]{color:#ffbfbf!important;background:rgba(17,0,0,.85)!important;border:1px solid rgba(255,0,0,.8)!important}.dg .cr{background:rgba(25,0,0,.7)!important;color:rgba(255,0,0,.9)!important}.dg .cr:hover{background:rgba(120,0,0,.8)!important}';
+      style.textContent = '.dg.ac{z-index:2147483647!important}.dg.main{position:fixed!important;top:0!important;right:-15px!important;background:rgba(20,0,0,.95)!important;width:300px!important;padding:10px!important;border-radius:8px!important;color:#ffb3b3!important;font-family:Arial,sans-serif!important;font-size:20px!important;box-shadow:0 0 10px rgba(255,0,0,.7)!important;z-index:2147483647!important;border:1px solid rgba(255,0,0,.9)!important}.dg.main .title{text-align:center;color:#f00!important;border-bottom:1px solid rgba(255,0,0,.8);font-size:16px;font-weight:bold}.dg .folder .title{background:rgba(60,0,0,.7)!important;color:#f99!important;font-size:14px;font-weight:bold;border-radius:4px}.dg .folder .folder .title{background:rgba(100,0,0,.7)!important}.dg .folder .folder .folder .title{background:rgba(140,0,0,.6)!important}.dg .folder .title:hover{background:rgba(255,0,0,.9)!important;color:#fff!important;box-shadow:0 0 6px rgba(255,0,0,.9)}.dg .slider-fg{background:rgba(255,0,0,.9)!important}.dg .c input[type=text]{color:#ffbfbf!important;background:rgba(17,0,0,.85)!important;border:1px solid rgba(255,0,0,.8)!important}.dg .cr{background:rgba(25,0,0,.7)!important;color:rgba(255,0,0,.9)!important}.dg .cr:hover{background:rgba(120,0,0,.8)!important}';
       document.head.appendChild(style);
       var menu = new window.dat.GUI();
       var folders = [];
